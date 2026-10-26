@@ -70,6 +70,7 @@ internal static class Program
             await CheckStaticStopAsync(path);
             await CheckEncoderAbortCleanupAsync(path);
             await CheckEncoderFailureCleanupAsync(path);
+            await AudioMuxSmoke.VerifyAsync(path);
             Console.WriteLine($"PASS synthetic H.264 MP4; {bytes.Length} bytes; 160x96; {properties.Duration.TotalSeconds:F3}s; frame decoded. No desktop capture. Output: {path}");
             return 0;
 
@@ -155,11 +156,20 @@ internal static class Program
         Require(first.Timestamp == TimeSpan.Zero, "Recording does not start at zero.");
         timeline.Pause();
         TimeSpan paused = timeline.Elapsed;
+        var pauseState = timeline.Clock;
+        Require(pauseState.PauseGeneration == 1 && pauseState.LastPauseElapsed == paused &&
+            pauseState.Elapsed == paused && pauseState.IsPaused && !pauseState.IsRunning,
+            "The atomic clock did not publish its accepted pause generation and boundary.");
+        timeline.Pause();
+        Require(timeline.Clock.PauseGeneration == 1 && timeline.Clock.LastPauseElapsed == paused,
+            "Repeated Pause advanced the pause generation or boundary.");
         Task<BgraVideoFrame?> pending = timeline.GetNextSampleAsync(CancellationToken.None).AsTask();
         timeline.PublishPixels(during);
         await Task.Delay(100);
         Require(!pending.IsCompleted && timeline.Elapsed == paused, "Pause emitted a sample or added time.");
         timeline.Resume();
+        Require(timeline.Clock.PauseGeneration == 1 && timeline.Clock.LastPauseElapsed == paused && !timeline.Clock.IsPaused,
+            "Resume reset the pause generation or lost the previous boundary.");
         await Task.Delay(50);
         Require(!pending.IsCompleted && timeline.Elapsed == paused, "Resume reused stale pixels before a fresh frame.");
         timeline.PublishPixels(after);

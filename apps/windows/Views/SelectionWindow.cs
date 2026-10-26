@@ -69,7 +69,7 @@ internal sealed class SelectionWindow
             if (_blackPen == 0 || _whitePen == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
             RegisterClass();
             _window = Native.CreateWindowEx(0x00000008 | 0x00000080 | 0x00010000, ClassName,
-                "Select screenshot area. Drag or use arrows and Enter. Escape cancels.", 0x80000000 | 0x02000000,
+                "Select capture area. Drag or use arrows and Enter. Space selects a window. Escape cancels.", 0x80000000 | 0x02000000,
                 controls.Left, controls.Top, controls.Width, controls.Height, 0, 0, Native.GetModuleHandle(null), 0);
             if (_window == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
             uint dpi = Win32.GetDpiForWindow(_window);

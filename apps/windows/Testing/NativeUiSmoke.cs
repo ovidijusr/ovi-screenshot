@@ -42,6 +42,8 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
                 throw new InvalidOperationException("Recording monitor validation ignored a same-size change of origin.");
             await VerifyMultiDisplayOverlayAsync();
             await ServiceSmoke.VerifyAsync(Path.ChangeExtension(marker, ".service-cache"));
+            await RecordingAudioSmoke.VerifyAsync();
+            _settings.VerifySyntheticRecordingSettings();
             _settings.SetShortcutEditingEnabled(false);
             _settings.StartKeyCapture();
             if (_settings.IsLearningShortcut) throw new InvalidOperationException("Shortcut editing was not blocked during an update.");
@@ -56,7 +58,7 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             await SelectionWindow.RenderCancelAppearanceAsync(Path.ChangeExtension(marker, ".cancel.png"));
             await VerifyWindowCaptureAsync(marker);
             await RenderDocumentationImagesAsync(marker);
-            return "PASS multi-display composition/routing/selection and generated overlay; recording outline, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window capture/PNG alpha, preview stack, shared-capture trash/busy protection/adaptive actions, drag payload, tray menu, shortcuts and bitmap geometry. " + details + $" Connected displays: {connectedDisplays.Monitors.Count}." + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture or cross-app launch/drop performed.";
+            return "PASS multi-display composition/routing/selection and generated overlay; recording settings drafts/explicit Apply/pending rollback/unavailable routes, generated PCM timing/mix/pause/ownership, recording outline/move, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window WGC/PNG alpha and MP4 movement/pause/resize/orientation, preview stack, shared-capture trash/busy protection/adaptive actions, drag payload, tray menu, shortcuts and bitmap geometry. " + details + $" Connected displays: {connectedDisplays.Monitors.Count}." + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture, audio device capture or cross-app launch/drop performed.";
         }
         finally
         {
@@ -106,6 +108,14 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             boundary.Show();
             if (!boundary.IsVisible || boundary.VisibleStripCount != 4) throw new InvalidOperationException("Recording area outline did not show all edges.");
             boundary.SetPaused(true);
+            boundary.UpdateBounds(new Win32.Rect
+            {
+                Left = area.Left + 56, Top = area.Top + 56,
+                Right = Math.Min(area.Right - 24, area.Left + 376), Bottom = Math.Min(area.Bottom - 24, area.Top + 256)
+            }, area);
+            boundary.Show();
+            if (!boundary.IsVisible || boundary.VisibleStripCount != 4)
+                throw new InvalidOperationException("Moved recording outline lost its visible edges.");
             boundary.SetPaused(false);
         }
         var control = _recordingControl!;
@@ -178,6 +188,12 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
         _settings.SetShortcut("Ctrl+Shift+4");
         _settings.SetShortcutEditingEnabled(true);
         _settings.SetStatus("");
+        _settings.SetRecordingOptions(new RecordingOptions());
+        _settings.SetAudioDevices(new AudioDeviceCatalog(
+            [new(null, "Default device"), new("fixture-output", "Demo speakers")],
+            [new(null, "Default device"), new("fixture-microphone", "Demo microphone")]));
+        _settings.SetRecordingStatus("");
+        _settings.SetRecordingUpdatePending(false);
         _settings.Activate();
         await Task.Delay(100);
         await RenderFixtureAsync((FrameworkElement)_settings.Content, Path.ChangeExtension(marker, ".settings.png"));
@@ -451,6 +467,7 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             {
                 var result = CaptureImageFactory.Create(image, new PixelSelection(0, 0, image.Width, image.Height), _recordingWorkArea, windowShadow: true);
                 await File.WriteAllBytesAsync(Path.ChangeExtension(marker, ".window.png"), await result.ReadPngAsync());
+                await WindowRecordingSmoke.VerifyAsync(fixture, handle, marker);
             }
         }
         finally { fixture.Close(); }

@@ -9,11 +9,11 @@ This document separates the current preview from planned work. The [README](../R
 - Notification-area launch, configurable shortcut, and modern theme-aware menus/settings.
 - Area capture and Space-to-select-window capture, exported through Rust as PNG.
 - Nonactivating stacked previews with hover Copy/Save/Close, double-click open, and native PNG drag-out.
-- Selected-area video-only MP4 recording with countdown, pause/resume, stop, and a visible recording boundary.
+- Area/window MP4 recording with countdown, pause/resume, stop, a visible recording boundary, FPS settings, and optional system sound/microphone audio.
 - Recoverable completed recordings, atomic settings, bounded PNG memory storage, and seven-day inactive cache retention.
 - Synthetic Rust, bridge, service, native UI and video checks; a portable Windows x64 packaging script.
 
-The current cache is not an editable or browsable screenshot history. Recording has no audio. The image pipeline is SDR. Screenshot regions can span connected displays. A video stays on the display where its selection starts; cross-monitor video is not implemented.
+The current cache is not an editable or browsable screenshot history. The image pipeline is SDR. Screenshot regions can span connected displays. Area video stays on the display where its selection starts; window video captures one fixed-size native window and follows movement.
 
 ## Before public distribution
 
@@ -45,4 +45,4 @@ Use the same capture-to-preview workflow with platform-native styling. Do not cl
 
 For substantial independent work, assign focused core, Windows and UI tasks with explicit file ownership. Agree on shared contracts before dependent edits. Keep small fixes with one owner; avoid duplicate investigation and repeated full-suite runs after the required checks pass. Detailed delegation and validation rules are in [AGENTS.md](../AGENTS.md).
 
-OCR, scrolling capture, cloud sharing, collaboration, image combining, audio recording and ARM64 support remain uncommitted future possibilities.
+OCR, scrolling capture, cloud sharing, collaboration, image combining and ARM64 support remain uncommitted future possibilities.

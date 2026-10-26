@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Foundation;
 using Windows.Media.Core;
 using Windows.Media.MediaProperties;
@@ -12,45 +13,64 @@ namespace Ovi.Screenshot.Capture;
 internal sealed class Mp4FrameEncoder : IAsyncDisposable
 {
     internal const uint FrameRate = 30;
+    internal const int AudioSampleCapacity = 8;
     internal static readonly TimeSpan FrameInterval = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / FrameRate);
     private readonly MediaStreamSource _source;
     private readonly Func<CancellationToken, ValueTask<BgraVideoFrame?>> _provider;
+    private readonly Func<CancellationToken, ValueTask<PcmAudioFrame?>>? _audioProvider;
     private readonly SemaphoreSlim _requestGate = new(1, 1);
+    private readonly SemaphoreSlim _audioGate = new(1, 1);
+    private readonly SemaphoreSlim _audioSlots = new(AudioSampleCapacity, AudioSampleCapacity);
     private readonly CancellationTokenSource _end = new();
+    private readonly CancellationTokenSource _audioEnd = new();
     private readonly int _frameBytes;
     private readonly object _samplesGate = new(), _disposeGate = new();
     private readonly Dictionary<MediaStreamSample, BgraVideoFrame> _samples = new();
+    private readonly Dictionary<MediaStreamSample, PcmAudioFrame> _audioSamples = new();
     private IRandomAccessStream? _stream;
     private IAsyncActionWithProgress<double>? _transcodeOperation;
     private Task? _transcode;
     private Task? _disposeTask;
     private Exception? _sampleFailure;
     private int _processedSamples;
+    private int _processedAudioSamples;
+    private int _peakAudioSamples;
 
-    private Mp4FrameEncoder(int width, int height, Func<CancellationToken, ValueTask<BgraVideoFrame?>> provider)
+    private Mp4FrameEncoder(int width, int height, Func<CancellationToken, ValueTask<BgraVideoFrame?>> provider,
+        RecordingOptions options, Func<CancellationToken, ValueTask<PcmAudioFrame?>>? audioProvider)
     {
-        _provider = provider;
+        _provider = provider; _audioProvider = audioProvider;
         _frameBytes = checked(width * height * 4);
         var properties = VideoEncodingProperties.CreateUncompressed(MediaEncodingSubtypes.Bgra8, (uint)width, (uint)height);
         // WGC/Win2D buffers are top-down. Without an explicit stride Media Foundation
         // can assume bottom-up RGB storage and vertically invert the encoded video.
         properties.Properties[new Guid("644b4e48-1e02-4516-b0eb-c01ca9d49ac6")] = checked((uint)width * 4); // MF_MT_DEFAULT_STRIDE
-        properties.FrameRate.Numerator = FrameRate; properties.FrameRate.Denominator = 1;
+        properties.FrameRate.Numerator = (uint)options.FramesPerSecond; properties.FrameRate.Denominator = 1;
         properties.PixelAspectRatio.Numerator = properties.PixelAspectRatio.Denominator = 1;
-        _source = new MediaStreamSource(new VideoStreamDescriptor(properties))
-        {
-            BufferTime = TimeSpan.Zero, CanSeek = false
-        };
+        var video = new VideoStreamDescriptor(properties);
+        _source = audioProvider is null ? new MediaStreamSource(video) : new MediaStreamSource(video,
+            new AudioStreamDescriptor(AudioEncodingProperties.CreatePcm(PcmAudioFrame.SampleRate, PcmAudioFrame.Channels, PcmAudioFrame.BitsPerSample)));
+        _source.BufferTime = TimeSpan.Zero; _source.CanSeek = false;
         _source.Starting += OnStarting;
         _source.SampleRequested += OnSampleRequested;
     }
 
     internal Task Completion => _transcode ?? Task.CompletedTask;
     internal int ProcessedSampleCount => Volatile.Read(ref _processedSamples);
+    internal int ProcessedAudioSampleCount => Volatile.Read(ref _processedAudioSamples);
+    internal int PeakAudioSampleCount { get { lock (_samplesGate) return _peakAudioSamples; } }
+
+    internal static Task<Mp4FrameEncoder> StartAsync(int width, int height, string outputPath,
+        Func<CancellationToken, ValueTask<BgraVideoFrame?>> provider, CancellationToken cancellationToken) =>
+        StartAsync(width, height, outputPath, provider, new RecordingOptions(), null, cancellationToken);
 
     internal static async Task<Mp4FrameEncoder> StartAsync(int width, int height, string outputPath,
-        Func<CancellationToken, ValueTask<BgraVideoFrame?>> provider, CancellationToken cancellationToken)
+        Func<CancellationToken, ValueTask<BgraVideoFrame?>> provider, RecordingOptions options,
+        Func<CancellationToken, ValueTask<PcmAudioFrame?>>? audioProvider, CancellationToken cancellationToken)
     {
+        options.Validate();
+        if (options.HasAudio != (audioProvider is not null))
+            throw new ArgumentException("The audio setting and PCM source must match.", nameof(audioProvider));
         if (width < 2 || height < 2 || (width & 1) != 0 || (height & 1) != 0)
             throw new ArgumentException("The MP4 frame dimensions must be positive even numbers.");
         string fullPath = Path.GetFullPath(outputPath);
@@ -58,7 +78,7 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
         if (!Path.IsPathFullyQualified(outputPath) || directory is null || !string.Equals(Path.GetExtension(fullPath), ".mp4", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Choose an absolute path ending in .mp4.", nameof(outputPath));
         Directory.CreateDirectory(directory);
-        var encoder = new Mp4FrameEncoder(width, height, provider);
+        var encoder = new Mp4FrameEncoder(width, height, provider, options, audioProvider);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -66,9 +86,9 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
             var file = await folder.CreateFileAsync(Path.GetFileName(fullPath), CreationCollisionOption.FailIfExists);
             encoder._stream = await file.OpenAsync(FileAccessMode.ReadWrite);
             var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
-            profile.Audio = null;
+            profile.Audio = options.HasAudio ? AudioEncodingProperties.CreateAac(PcmAudioFrame.SampleRate, PcmAudioFrame.Channels, 192_000) : null;
             profile.Video.Width = (uint)width; profile.Video.Height = (uint)height;
-            profile.Video.FrameRate.Numerator = FrameRate; profile.Video.FrameRate.Denominator = 1;
+            profile.Video.FrameRate.Numerator = (uint)options.FramesPerSecond; profile.Video.FrameRate.Denominator = 1;
             profile.Video.PixelAspectRatio.Numerator = profile.Video.PixelAspectRatio.Denominator = 1;
             profile.Video.Bitrate = (uint)Math.Clamp((long)width * height * 4, 2_000_000, 32_000_000);
             var transcoder = new MediaTranscoder { HardwareAccelerationEnabled = true };
@@ -105,24 +125,23 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
     {
         MediaStreamSourceSampleRequest? request = null;
         MediaStreamSourceSampleRequestDeferral? deferral = null;
+        SemaphoreSlim? gate = null;
+        CancellationToken cancellation = default;
         bool acquired = false;
         try
         {
             request = args.Request;
             deferral = request.GetDeferral();
-            await _requestGate.WaitAsync(_end.Token).ConfigureAwait(false);
+            bool audio = request.StreamDescriptor is AudioStreamDescriptor;
+            gate = audio ? _audioGate : _requestGate;
+            cancellation = audio ? _audioEnd.Token : _end.Token;
+            await gate.WaitAsync(cancellation).ConfigureAwait(false);
             acquired = true;
-            if (_end.IsCancellationRequested) { EndRequest(request); return; }
-            BgraVideoFrame? frame = await _provider(_end.Token).ConfigureAwait(false);
-            if (frame is null || _end.IsCancellationRequested)
-            {
-                frame?.Dispose();
-                EndRequest(request);
-                return;
-            }
-            SubmitFrame(request, frame);
+            if (cancellation.IsCancellationRequested) { EndRequest(request); return; }
+            if (audio) await SupplyAudioAsync(request, cancellation).ConfigureAwait(false);
+            else await SupplyVideoAsync(request, cancellation).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (_end.IsCancellationRequested) { EndRequest(request); }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { EndRequest(request); }
         catch (Exception error)
         {
             ReportCallbackFailure(error);
@@ -130,8 +149,43 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
         }
         finally
         {
-            FinishRequest(() => deferral?.Complete(), () => { if (acquired) _requestGate.Release(); }, ReportCallbackFailure);
+            FinishRequest(() => deferral?.Complete(), () => { if (acquired) gate!.Release(); }, ReportCallbackFailure);
         }
+    }
+
+    private async Task SupplyVideoAsync(MediaStreamSourceSampleRequest request, CancellationToken cancellation)
+    {
+        BgraVideoFrame? frame = await _provider(cancellation).ConfigureAwait(false);
+        if (frame is null || cancellation.IsCancellationRequested)
+        {
+            frame?.Dispose(); EndRequest(request); return;
+        }
+        SubmitFrame(request, frame);
+    }
+
+    private async Task SupplyAudioAsync(MediaStreamSourceSampleRequest request, CancellationToken cancellation)
+    {
+        await _audioSlots.WaitAsync(cancellation).ConfigureAwait(false);
+        bool registered = false;
+        try
+        {
+            var frame = await _audioProvider!(cancellation).ConfigureAwait(false);
+            if (frame is null || cancellation.IsCancellationRequested) { EndRequest(request); return; }
+            long expectedTicks = (long)(frame.Pcm.Length / PcmAudioFrame.BytesPerFrame) * TimeSpan.TicksPerSecond / PcmAudioFrame.SampleRate;
+            if (frame.Pcm.Length == 0 || frame.Pcm.Length > PcmAudioFrame.BytesPerBlock || frame.Pcm.Length % PcmAudioFrame.BytesPerFrame != 0 ||
+                frame.Timestamp < TimeSpan.Zero || frame.Duration <= TimeSpan.Zero || Math.Abs(frame.Duration.Ticks - expectedTicks) > 1)
+                throw new InvalidOperationException("An audio frame has an invalid PCM layout or duration.");
+            var sample = MediaStreamSample.CreateFromBuffer(frame.Pcm.AsBuffer(), frame.Timestamp);
+            sample.Duration = frame.Duration;
+            lock (_samplesGate)
+            {
+                _audioSamples.Add(sample, frame); registered = true;
+                _peakAudioSamples = Math.Max(_peakAudioSamples, _audioSamples.Count);
+            }
+            sample.Processed += OnSampleProcessed;
+            request.Sample = sample;
+        }
+        finally { if (!registered) _audioSlots.Release(); }
     }
 
     // Takes ownership even if a native assignment fails. Once registered, keep
@@ -156,24 +210,35 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
     {
         try
         {
-            if (ReleaseSample(sample)) Interlocked.Increment(ref _processedSamples);
+            switch (ReleaseSample(sample))
+            {
+                case SampleKind.Video: Interlocked.Increment(ref _processedSamples); break;
+                case SampleKind.Audio: Interlocked.Increment(ref _processedAudioSamples); break;
+            }
         }
         catch (Exception error) { ReportCallbackFailure(error); }
     }
 
-    private bool ReleaseSample(MediaStreamSample sample)
+    private SampleKind ReleaseSample(MediaStreamSample sample)
     {
         BgraVideoFrame? frame;
-        lock (_samplesGate) { if (!_samples.Remove(sample, out frame)) return false; }
+        bool audio;
+        lock (_samplesGate)
+        {
+            audio = _audioSamples.Remove(sample);
+            if (!_samples.Remove(sample, out frame) && !audio) return SampleKind.None;
+        }
         try { sample.Processed -= OnSampleProcessed; }
-        finally { frame.Dispose(); }
-        return true;
+        finally { frame?.Dispose(); if (audio) _audioSlots.Release(); }
+        return audio ? SampleKind.Audio : SampleKind.Video;
     }
+
+    private enum SampleKind { None, Video, Audio }
 
     private void ReleaseRemainingSamples()
     {
         MediaStreamSample[] samples;
-        lock (_samplesGate) samples = _samples.Keys.ToArray();
+        lock (_samplesGate) samples = _samples.Keys.Concat(_audioSamples.Keys).ToArray();
         foreach (var sample in samples)
         {
             try { ReleaseSample(sample); }
@@ -208,9 +273,10 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
         finally { releaseGate(); }
     }
 
-    internal async Task CompleteAsync()
+    internal async Task CompleteAsync(bool drainAudio = false)
     {
         _end.Cancel();
+        if (!drainAudio) _audioEnd.Cancel();
         if (_transcode is not null)
         {
             try { await _transcode.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false); }
@@ -222,6 +288,7 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
 
     private void RequestAbort()
     {
+        _audioEnd.Cancel();
         if (_transcode?.IsCompleted != false) return;
         try { _transcodeOperation?.Cancel(); }
         catch (Exception error) { RecordFailure(error); }
@@ -234,7 +301,7 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
 
     private async Task DisposeCoreAsync()
     {
-        _end.Cancel(); RequestAbort();
+        _end.Cancel(); _audioEnd.Cancel(); RequestAbort();
         if (_transcode is not null)
         {
             try { await _transcode.ConfigureAwait(false); } catch { /* Reported by the recording completion path. */ }
@@ -242,10 +309,15 @@ internal sealed class Mp4FrameEncoder : IAsyncDisposable
         await _requestGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            DetachSourceCallbacks();
-            ReleaseRemainingSamples();
-            try { _stream?.Dispose(); }
-            finally { _stream = null; }
+            await _audioGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                DetachSourceCallbacks();
+                ReleaseRemainingSamples();
+                try { _stream?.Dispose(); }
+                finally { _stream = null; }
+            }
+            finally { _audioGate.Release(); }
         }
         finally { _requestGate.Release(); }
         // Don't dispose synchronization primitives while a late native callback can still unwind.

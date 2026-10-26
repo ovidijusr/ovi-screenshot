@@ -66,7 +66,7 @@ try {
     }
     Copy-Item -LiteralPath $taskAppPri -Destination (Join-Path $taskPublish 'Ovi.Screenshot.pri')
     foreach ($taskRequired in @('Ovi.Screenshot.exe', 'Ovi.Screenshot.dll', 'Ovi.Screenshot.runtimeconfig.json',
-        'Ovi.Screenshot.pri', 'ovi_core.dll', 'coreclr.dll', 'hostfxr.dll', 'hostpolicy.dll', 'Microsoft.ui.xaml.dll', 'Assets\capture.wav')) {
+        'Ovi.Screenshot.pri', 'ovi_core.dll', 'coreclr.dll', 'hostfxr.dll', 'hostpolicy.dll', 'Microsoft.ui.xaml.dll', 'Assets\capture.wav', 'NAudio.Wasapi.dll', 'NAudio.Core.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $taskPublish $taskRequired) -PathType Leaf)) {
             throw "Portable publish is incomplete: missing $taskRequired. No ZIP was produced."
         }
@@ -100,13 +100,15 @@ This is an unsigned preview distributed as a folder, without an installer
 or automatic updates. The .NET and Windows App SDK runtimes are bundled.
 The app stores preferences and caches in %LOCALAPPDATA%\OviScreenshot;
 moving or replacing this program folder does not reset those preferences.
-Recording is video-only. macOS and the annotation editor are not included.
+Recording supports areas/windows and optional system sound and microphone.
+Choose FPS and audio devices in Settings. Audio defaults off.
+macOS and the annotation editor are not included.
 
 Quit the app before replacing it. To remove the program, quit and delete
 its extracted folder. User preferences and cached captures remain in AppData.
 "@
     [IO.File]::WriteAllText((Join-Path $taskPublish 'README.txt'), $taskReadme, [Text.UTF8Encoding]::new($false))
-    foreach ($taskNotice in @('LICENSE', 'LICENSE.txt', 'LICENSE.md', 'NOTICE', 'NOTICE.txt', 'THIRD-PARTY-NOTICES.txt')) {
+    foreach ($taskNotice in @('LICENSE', 'LICENSE.txt', 'LICENSE.md', 'NOTICE', 'NOTICE.txt', 'THIRD-PARTY-NOTICES.txt', 'THIRD-PARTY-NOTICES.md')) {
         $taskNoticePath = Join-Path $taskRepository $taskNotice
         if (Test-Path -LiteralPath $taskNoticePath -PathType Leaf) {
             Copy-Item -LiteralPath $taskNoticePath -Destination (Join-Path $taskPublish $taskNotice)

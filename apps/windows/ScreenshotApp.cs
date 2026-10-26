@@ -18,6 +18,7 @@ public sealed partial class ScreenshotApp : Application
     private CaptureCoordinator? _captures;
     private RecordingController? _recordings;
     private ShortcutController? _shortcuts;
+    private RecordingSettingsController? _recordingSettings;
     private bool _quitting;
 
     internal ScreenshotApp(string[] arguments)
@@ -53,10 +54,13 @@ public sealed partial class ScreenshotApp : Application
             var store = new SettingsStore(_paths.Settings);
             var loaded = store.Load();
             _settings.SetShortcut(loaded.Shortcut);
+            _settings.SetRecordingOptions(loaded.Recording);
+            _recordingSettings = new RecordingSettingsController(store, _settings, loaded.Recording, _log.Write);
+            _settings.RecordingRequested += _recordingSettings.Apply;
             _recordings = new RecordingController(_settings.DispatcherQueue, new RecordingLibrary(_paths, _log), _log, Report,
                 new UserDialogs(_settings).ConfirmDiscardRecordingAsync);
             Task recovery = _recordings.RecoverAsync();
-            _captures = new CaptureCoordinator(_settings, _previews, _recordings, Report);
+            _captures = new CaptureCoordinator(_settings, _previews, _recordings, Report, _recordingSettings.ForRecordingAsync);
             _recordings.CaptureRequested += _captures.RecordArea;
             _previews.Failed += _log.Write;
             _previews.Deleted += _captures.Forget;
@@ -105,7 +109,11 @@ public sealed partial class ScreenshotApp : Application
 
     private void ShowSettings()
     {
-        if (!_quitting) _settings?.Activate();
+        if (!_quitting)
+        {
+            _settings?.Activate();
+            _recordingSettings?.RefreshDevices();
+        }
     }
 
     private void Report(Exception error)
@@ -124,7 +132,8 @@ public sealed partial class ScreenshotApp : Application
         await Task.WhenAll(
             StopSafelyAsync(() => _recordings?.ShutdownAsync() ?? Task.CompletedTask),
             StopSafelyAsync(_previews.ShutdownAsync),
-            StopSafelyAsync(() => _shortcuts?.StopAsync() ?? Task.CompletedTask));
+            StopSafelyAsync(() => _shortcuts?.StopAsync() ?? Task.CompletedTask),
+            StopSafelyAsync(() => _recordingSettings?.StopAsync() ?? Task.CompletedTask));
         try { _desktop?.Dispose(); }
         catch (Exception error) { _log.Write(error); }
         finally { _settings?.Close(); Exit(); }

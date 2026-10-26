@@ -8,14 +8,27 @@ internal sealed class RecordingTimeline : IDisposable
 {
     private readonly object _gate = new();
     private readonly Stopwatch _clock = new();
+    private readonly TimeSpan _frameInterval;
     private TaskCompletionSource _changed = NewSignal();
     private VideoFrameLease? _pixels;
     private bool _started, _paused, _stopped;
     private long _nextSampleTicks, _lastTimestamp = -1;
+    private long _pauseGeneration;
+    private TimeSpan _lastPauseElapsed;
+
+    internal RecordingTimeline(TimeSpan? frameInterval = null)
+    {
+        _frameInterval = frameInterval ?? Mp4FrameEncoder.FrameInterval;
+        if (_frameInterval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(frameInterval));
+    }
 
     internal bool IsPaused { get { lock (_gate) return _paused; } }
     internal bool NeedsFrame { get { lock (_gate) return !_stopped && !_paused && _pixels is null; } }
     internal TimeSpan Elapsed { get { lock (_gate) return _clock.Elapsed; } }
+    internal RecordingClockState Clock
+    {
+        get { lock (_gate) return new(_clock.Elapsed, _clock.IsRunning, _paused, _stopped, _pauseGeneration, _lastPauseElapsed); }
+    }
 
     internal void PublishPixels(byte[] pixels)
     {
@@ -44,6 +57,8 @@ internal sealed class RecordingTimeline : IDisposable
             if (_stopped || _paused) return;
             _paused = true;
             _clock.Stop();
+            _lastPauseElapsed = _clock.Elapsed;
+            _pauseGeneration++;
             ReleaseLatestFrame();
             SignalChanged();
         }
@@ -97,8 +112,8 @@ internal sealed class RecordingTimeline : IDisposable
                     {
                         long timestamp = _lastTimestamp < 0 ? 0 : Math.Max(elapsed, _lastTimestamp + 1);
                         _lastTimestamp = timestamp;
-                        _nextSampleTicks = checked(timestamp + Mp4FrameEncoder.FrameInterval.Ticks);
-                        return new BgraVideoFrame(_pixels.Retain(), TimeSpan.FromTicks(timestamp), Mp4FrameEncoder.FrameInterval);
+                        _nextSampleTicks = checked(timestamp + _frameInterval.Ticks);
+                        return new BgraVideoFrame(_pixels.Retain(), TimeSpan.FromTicks(timestamp), _frameInterval);
                     }
                 }
             }

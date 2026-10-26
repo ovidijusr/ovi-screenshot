@@ -93,9 +93,29 @@ internal static class ServiceSmoke
     {
         var store = new SettingsStore(paths.Settings);
         Require(store.Load().Shortcut == SettingsStore.DefaultShortcut, "Missing settings did not use the default.");
+        await File.WriteAllTextAsync(paths.Settings, """{"Shortcut":"Shift+Win+3"}""");
+        Require(store.Load() is { Shortcut: "Shift+Win+3", Warning: null } legacy
+            && legacy.Recording == new RecordingOptions(), "Legacy settings lost their shortcut or recording defaults.");
         await store.SaveAsync("Shift+Win+3");
         Require(store.Load() is { Shortcut: "Shift+Win+3", Warning: null }, "Settings did not survive reload.");
+        Require(store.Load().Recording == new RecordingOptions(), "Legacy shortcut settings did not receive recording defaults.");
+        var recording = new RecordingOptions(60, true, true, "fixture-output", "fixture-input");
+        await Task.WhenAll(store.SaveRecordingAsync(recording), store.SaveAsync("Ctrl+Shift+5"));
+        var combined = store.Load();
+        Require(combined.Shortcut == "Ctrl+Shift+5" && combined.Recording == recording,
+            "Concurrent shortcut and recording updates replaced each other's settings.");
+        await store.SaveAsync("Shift+Win+3");
+        Require(store.Load().Recording == recording, "Rebinding the capture key reset recording preferences.");
         string saved = await File.ReadAllTextAsync(paths.Settings);
+        bool invalidFps = false;
+        try { await store.SaveRecordingAsync(new RecordingOptions(0)); }
+        catch (ArgumentException) { invalidFps = true; }
+        Require(invalidFps && await File.ReadAllTextAsync(paths.Settings) == saved,
+            "Invalid recording settings replaced saved preferences.");
+        await File.WriteAllTextAsync(paths.Settings, """{"Shortcut":"Shift+Win+3","Recording":{"FramesPerSecond":0}}""");
+        Require(store.Load() is { Shortcut: "Shift+Win+3", Warning: not null } invalid
+            && invalid.Recording == new RecordingOptions(), "Invalid recording preferences reset a valid shortcut.");
+        await File.WriteAllTextAsync(paths.Settings, saved);
         bool rejected = false;
         try { await AtomicJsonFile.WriteAsync(paths.Settings, new BrokenSettings()); }
         catch { rejected = true; }

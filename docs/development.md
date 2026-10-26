@@ -68,7 +68,11 @@ The fixture also verifies native key mapping, opens/dismisses the modern tray Me
 
 The recording fixture includes four different corner markers and checks their positions after native H.264 encoding/decoding. The reproduced upside-down RGB path was fixed by declaring a positive `MF_MT_DEFAULT_STRIDE` on the uncompressed BGRA media type; do not compensate with PNG rotation or player metadata.
 
+Recording settings persist a target FPS and independent system sound/microphone routes. Automated audio checks use generated PCM and deterministic clocks, including mixing, idle silence and pause behavior; they must never open the user's microphone or capture system playback. Check real device permissions, loopback/microphone sound, unplug behavior and perceived synchronization through a deliberate user recording. The native settings fixture uses fake device names, so gallery output cannot expose hardware metadata.
+
 The UI fixture also checks recording-boundary geometry/show/pause/disposal and window-selection geometry/z-order. Window-capture validation uses WGC only against an opaque generated four-color window in this process, then verifies channels, orientation, transparent margins, and PNG export through Rust. No desktop or third-party window pixels are acquired automatically. The `.window.png` artifact includes an app-generated soft shadow; native rounded-corner alpha is preserved when supplied by WGC.
+
+The same generated HWND exercises window video at 24/15 fps targets: moving it keeps recording active, pause freezes the clock, normal Stop produces an upright decoded MP4, and resizing finalizes a playable clip at its original dimensions. Realtime output may have a lower average frame rate than the configured target; fixed-timestamp encoding fixtures verify configured FPS separately.
 
 Multi-display checks compose generated memory DIBs with negative origins, unequal resolutions and gaps, then crop/export the combined pixels through Rust. They exercise monitor-local video routing, a generated selector with separate monitor limits, and native monitor metadata, including a same-size origin mismatch. They do not acquire real screen frames. Actual cross-screen dragging, mixed-DPI appearance and monitor reconfiguration during recording require intentional manual checks on the existing display setup.
 

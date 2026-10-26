@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Markup;
+using Ovi.Screenshot.Capture;
 using Ovi.Screenshot.Native;
 
 namespace Ovi.Screenshot.Views;
@@ -13,6 +14,7 @@ internal sealed class SettingsWindow : Window
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
     private readonly Button _learn = new() { Content = "Set key", VerticalAlignment = VerticalAlignment.Bottom };
     private readonly Button _apply;
+    private readonly RecordingSettingsSection _recording = new();
     private bool _editingEnabled = true;
     private ShortcutKeyCapture? _keyCapture;
     private readonly nint _window;
@@ -21,6 +23,7 @@ internal sealed class SettingsWindow : Window
     internal event Action? QuitRequested;
     internal event Action<string>? ShortcutRequested;
     internal event Action<bool>? KeyCaptureChanged;
+    internal event Action<RecordingOptions>? RecordingRequested;
     internal bool IsLearningShortcut => _keyCapture is not null;
 
     internal SettingsWindow()
@@ -28,12 +31,12 @@ internal sealed class SettingsWindow : Window
         Title = "Settings — Ovi Screenshot";
         nint window = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _window = window;
-        double scale = Win32.GetDpiForWindow(window) / 96d;
+        double scale = Math.Max(1, Win32.GetDpiForWindow(window) / 96d);
         var workArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
         int margin = (int)Math.Round(24 * scale);
         AppWindow.Resize(new Windows.Graphics.SizeInt32(
-            Math.Min((int)Math.Round(380 * scale), Math.Max(1, workArea.Width - margin)),
-            Math.Min((int)Math.Round(300 * scale), Math.Max(1, workArea.Height - margin))));
+            Math.Min((int)Math.Round(440 * scale), Math.Max(1, workArea.Width - margin)),
+            Math.Min((int)Math.Round(620 * scale), Math.Max(1, workArea.Height - margin))));
         AutomationProperties.SetAutomationId(_shortcut, "CaptureShortcut");
         AutomationProperties.SetAutomationId(_status, "SettingsStatus");
         AutomationProperties.SetLiveSetting(_status, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
@@ -51,6 +54,9 @@ internal sealed class SettingsWindow : Window
         AutomationProperties.SetAutomationId(apply, "ApplyCaptureShortcut");
         apply.Click += (_, _) => { StopKeyCapture(); ShortcutRequested?.Invoke(_shortcut.Text); };
         content.Children.Add(apply); content.Children.Add(_status);
+        _recording.Margin = new Thickness(0, 8, 0, 4);
+        _recording.ApplyRequested += options => { StopKeyCapture(); RecordingRequested?.Invoke(options); };
+        content.Children.Add(_recording);
         var actions = new Grid { ColumnSpacing = 8, ColumnDefinitions = { new ColumnDefinition(), new ColumnDefinition(), new ColumnDefinition() } };
         var capture = new Button { Content = "Capture", HorizontalAlignment = HorizontalAlignment.Stretch };
         AutomationProperties.SetAutomationId(capture, "SettingsCapture");
@@ -119,6 +125,11 @@ internal sealed class SettingsWindow : Window
     }
 
     internal void SetShortcut(string shortcut) => _shortcut.Text = shortcut;
+    internal void SetRecordingOptions(RecordingOptions options) => _recording.SetOptions(options);
+    internal void SetAudioDevices(AudioDeviceCatalog devices) => _recording.SetDevices(devices);
+    internal void SetRecordingStatus(string message, bool isError = false) => _recording.SetStatus(message, isError);
+    internal void SetRecordingUpdatePending(bool pending) => _recording.SetPending(pending);
+    internal void VerifySyntheticRecordingSettings() => RecordingSettingsSection.VerifySynthetic();
     internal void CancelKeyCapture() => StopKeyCapture();
     internal void SetShortcutEditingEnabled(bool enabled)
     {

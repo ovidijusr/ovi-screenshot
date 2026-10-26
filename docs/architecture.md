@@ -100,7 +100,9 @@ Windows uses Per-Monitor V2 awareness. Still-selection source pixels are physica
 
 ## Native screen recording
 
-Selected-area MP4 recording is implemented. On Windows, WGC supplies monitor frames, the native adapter crops the selected pixel region, and Windows `MediaStreamSource`/`MediaTranscoder` encodes H.264 MP4. Recording is video-only and SDR initially, capped at 30 fps. Odd region dimensions receive one padding pixel where the encoder requires even dimensions; content is not stretched.
+Area and window MP4 recording use WGC. The area adapter crops monitor frames; window recording captures an HWND directly and follows movement. Windows `MediaStreamSource`/`MediaTranscoder` encodes SDR H.264 MP4 at the configured target of 15/24/30/60 fps. Odd region dimensions receive one padding pixel where the encoder requires even dimensions; content is not stretched. Window sources keep their initial dimensions and finalize on resize, minimize or closure.
+
+`RecordingOptions` is an immutable snapshot per session. `SettingsStore` serializes independent shortcut and recording updates and atomically replaces their merged document. `RecordingSettingsController` owns saved preferences and metadata-only device refresh. It opens no capture stream for Settings. Requested audio sources open after the countdown: [NAudio WASAPI](https://github.com/naudio/NAudio) supplies system loopback and microphone PCM, bounded buffers align and mix them against the active video clock, and the native encoder adds AAC. No audio stream is added when both toggles are off. Separate audio/video request gates prevent stream startup from blocking the first video sample; native sample ownership lasts through consumption.
 
 Stop finalizes and closes the output stream before the Save dialog or copy operation consumes the file. Keep unsaved recordings recoverable in the local cache. The synthetic recording harness tests the same encoder with generated frames and decodes its output without desktop capture. Native recording/permission/desktop behavior requires user-initiated acceptance tests.
 

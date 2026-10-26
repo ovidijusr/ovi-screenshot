@@ -13,5 +13,6 @@
     <Compile Include="..\Capture\Mp4FrameEncoder.cs" Link="Mp4FrameEncoder.cs" />
     <Compile Include="..\Capture\RecordingTimeline.cs" Link="RecordingTimeline.cs" />
     <Compile Include="..\Capture\VideoFrameBufferPool.cs" Link="VideoFrameBufferPool.cs" />
+    <Compile Include="..\Capture\RecordingOptions.cs" Link="RecordingOptions.cs" />
   </ItemGroup>
 </Project>

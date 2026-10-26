@@ -18,7 +18,7 @@ internal sealed class RecordingBoundaryWindow : IDisposable
     private readonly string _className = $"OviRecordingBoundary_{Guid.NewGuid():N}";
     private readonly uint _thread = Native.GetCurrentThreadId();
     private readonly nint _instance = Native.GetModuleHandle(null);
-    private readonly Win32.Rect _region, _monitor;
+    private Win32.Rect _region, _monitor;
     private readonly List<Strip> _strips = new(4);
     private nint _brush;
     private bool _registered, _paused, _disposed;
@@ -129,6 +129,27 @@ internal sealed class RecordingBoundaryWindow : IDisposable
         {
             Dispose();
             throw;
+        }
+    }
+
+    internal void UpdateBounds(Win32.Rect region, Win32.Rect monitor)
+    {
+        EnsureUsable();
+        var clipped = Intersect(region, monitor);
+        if (_region.Equals(clipped) && _monitor.Equals(monitor)) return;
+        uint dpi = Win32.GetDpiForWindow(_strips[0].Window);
+        int thickness = Math.Max(1, (int)Math.Round(2 * (dpi == 0 ? 96 : dpi) / 96d));
+        var layout = Layout(clipped, monitor, thickness);
+        _region = clipped; _monitor = monitor;
+        for (int index = 0; index < _strips.Count; index++)
+        {
+            var strip = _strips[index];
+            strip.Placement = layout[index];
+            var bounds = strip.Placement.Bounds;
+            uint visibility = strip.Placement.RequiresCaptureExclusion && !strip.Excluded ? 0x0080u : Win32.SwpShowWindow;
+            if (!Win32.SetWindowPos(strip.Window, Win32.HwndTopmost, bounds.Left, bounds.Top,
+                bounds.Width, bounds.Height, Win32.SwpNoActivate | visibility))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
         }
     }
 
