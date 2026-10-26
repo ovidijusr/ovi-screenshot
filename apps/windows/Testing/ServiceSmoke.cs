@@ -2,6 +2,7 @@ using Ovi.Screenshot.Capture;
 using Ovi.Screenshot.Services;
 using Microsoft.UI.Dispatching;
 using Ovi.Screenshot.Native;
+using Ovi.Screenshot.Views;
 using System.Buffers.Binary;
 
 namespace Ovi.Screenshot.Testing;
@@ -14,6 +15,7 @@ internal static class ServiceSmoke
         Directory.CreateDirectory(paths.Root);
         await VerifyCaptureSoundAsync();
         await VerifySettingsAsync(paths);
+        await VerifyRecordingPreferencesAsync(paths);
         await LogSmoke.VerifyAsync(Path.Combine(paths.Root, "logs"));
         await VerifyRecoveryLifetimeAsync(paths);
         await VerifyRecordingRecoveryAsync(paths);
@@ -87,6 +89,24 @@ internal static class ServiceSmoke
         await cancelled.ShutdownAsync();
         await cancelledRecovery;
         Require(!cancelled.HasPendingRecording, "Cancelled recovery restored pending work.");
+    }
+
+    private static async Task VerifyRecordingPreferencesAsync(AppPaths paths)
+    {
+        var store = new SettingsStore(paths.Settings);
+        var window = new SettingsWindow();
+        var controller = new RecordingSettingsController(store, window, store.Load().Recording, error => throw error);
+        try
+        {
+            var chosen = new RecordingOptions(60, true, true, "fixture-output", "fixture-mic");
+            controller.Apply(chosen);
+            Require(await controller.ForRecordingAsync(CancellationToken.None) == chosen,
+                "The next recording did not wait for its accepted preferences.");
+            var saved = store.Load();
+            Require(saved.Shortcut == "Shift+Win+3" && saved.Recording == chosen,
+                "Recording toolbar preferences did not survive reload alongside the shortcut.");
+        }
+        finally { await controller.StopAsync(); window.Close(); }
     }
 
     private static async Task VerifySettingsAsync(AppPaths paths)

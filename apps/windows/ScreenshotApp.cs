@@ -60,7 +60,8 @@ public sealed partial class ScreenshotApp : Application
             _recordings = new RecordingController(_settings.DispatcherQueue, new RecordingLibrary(_paths, _log), _log, Report,
                 new UserDialogs(_settings).ConfirmDiscardRecordingAsync);
             Task recovery = _recordings.RecoverAsync();
-            _captures = new CaptureCoordinator(_settings, _previews, _recordings, Report, _recordingSettings.ForRecordingAsync);
+            _captures = new CaptureCoordinator(_settings, _previews, _recordings, Report,
+                _recordingSettings.ForRecordingAsync, _recordingSettings.Apply);
             _recordings.CaptureRequested += _captures.RecordArea;
             _previews.Failed += _log.Write;
             _previews.Deleted += _captures.Forget;

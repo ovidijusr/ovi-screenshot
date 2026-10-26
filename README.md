@@ -14,7 +14,7 @@
 
 - **Select an area or a window.** Drag a region across one or more monitors, or press Space to pick a window. The selection stays undimmed; window captures preserve available transparency and get a soft generated shadow.
 - **Keep each capture within reach.** Previews stack at the screen edge. Hover for Copy, Save, Delete, and Close; double-click to open the full image, or drag its PNG into another app. Delete removes the app's capture immediately; saved/shared copies stay.
-- **Record an area or a window.** A cancellable three-second countdown, a visible boundary, and compact recording controls. Settings offers 15, 24, 30, or 60 fps and separate system sound and microphone switches. Audio starts off; paused time is excluded from the MP4.
+- **Record an area or a window.** Choose 15, 24, 30, or 60 fps and separate system sound and microphone options on the toolbar before pressing Record. A cancellable countdown, visible boundary, and compact controls follow. Audio starts off; paused time is excluded from the MP4.
 - **Use native Windows controls.** Start from the tray or your chosen shortcut. Menus and settings follow the Windows theme, and preview actions support keyboard focus.
 
 A short, soft sound confirms successful screenshots. Canceling a capture stays silent.
@@ -28,6 +28,10 @@ A short, soft sound confirms successful screenshots. Canceling a capture stays s
     <td><img src="docs/assets/settings.png" alt="Native WinUI settings view" width="460"></td>
   </tr>
 </table>
+
+**Recording setup**
+
+<p><img src="docs/assets/recording-setup.png" alt="WinUI recording toolbar with frame rate, audio switches and Record" width="452"></p>
 
 **Recording controls and countdown**
 

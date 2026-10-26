@@ -44,6 +44,8 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             await ServiceSmoke.VerifyAsync(Path.ChangeExtension(marker, ".service-cache"));
             await RecordingAudioSmoke.VerifyAsync();
             _settings.VerifySyntheticRecordingSettings();
+            await RecordingSetupWindow.VerifySyntheticAsync(_recordingWorkArea,
+                element => RenderFixtureAsync(element, Path.ChangeExtension(marker, ".recording-setup.png")));
             _settings.SetShortcutEditingEnabled(false);
             _settings.StartKeyCapture();
             if (_settings.IsLearningShortcut) throw new InvalidOperationException("Shortcut editing was not blocked during an update.");
@@ -58,7 +60,7 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             await SelectionWindow.RenderCancelAppearanceAsync(Path.ChangeExtension(marker, ".cancel.png"));
             await VerifyWindowCaptureAsync(marker);
             await RenderDocumentationImagesAsync(marker);
-            return "PASS multi-display composition/routing/selection and generated overlay; recording settings drafts/explicit Apply/pending rollback/unavailable routes, generated PCM timing/mix/pause/ownership, recording outline/move, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window WGC/PNG alpha and MP4 movement/pause/resize/orientation, preview stack, shared-capture trash/busy protection/adaptive actions, drag payload, tray menu, shortcuts and bitmap geometry. " + details + $" Connected displays: {connectedDisplays.Monitors.Count}." + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture, audio device capture or cross-app launch/drop performed.";
+            return "PASS multi-display composition/routing/selection and generated overlay; recording setup options/placement/Record/cancellation, recording settings drafts/explicit Apply/pending rollback/unavailable routes, generated PCM timing/mix/pause/ownership, recording outline/move, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window WGC/PNG alpha and MP4 movement/pause/resize/orientation, preview stack, shared-capture trash/busy protection/adaptive actions, drag payload, tray menu, shortcuts and bitmap geometry. " + details + $" Connected displays: {connectedDisplays.Monitors.Count}." + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture, audio device capture or cross-app launch/drop performed.";
         }
         finally
         {
@@ -99,6 +101,16 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
     {
         RecordingBoundaryWindow.VerifySyntheticLayout();
         var area = _recordingWorkArea;
+        using (var selectionBoundary = new RecordingBoundaryWindow(new Win32.Rect
+        {
+            Left = area.Left + 40, Top = area.Top + 40,
+            Right = Math.Min(area.Right - 40, area.Left + 360), Bottom = Math.Min(area.Bottom - 40, area.Top + 240)
+        }, area, selecting: true))
+        {
+            selectionBoundary.Show();
+            if (!selectionBoundary.IsVisible || selectionBoundary.VisibleStripCount != 4)
+                throw new InvalidOperationException("The recording setup selection outline was not shown.");
+        }
         using (var boundary = new RecordingBoundaryWindow(new Win32.Rect
         {
             Left = area.Left + 40, Top = area.Top + 40,

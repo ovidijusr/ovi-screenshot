@@ -34,6 +34,7 @@ internal sealed class RecordingSettingsController(SettingsStore store, SettingsW
             window.SetRecordingUpdatePending(true);
             await store.SaveRecordingAsync(options);
             Current = options;
+            window.SetRecordingOptions(options);
             window.SetRecordingStatus("Saved for the next recording.");
         }
         catch (Exception error)
