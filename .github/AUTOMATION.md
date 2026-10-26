@@ -8,4 +8,4 @@ Native Media Foundation H.264 encode/decode smoke is an optional **Run workflow*
 
 Interactive native UI tests are manual. CI does not establish Windows 11 capture behavior, focus handling, permission behavior, mixed-DPI correctness, clipboard/drag interoperability, physical keyboard mapping, or recording controls. See [development guidance](../docs/development.md) for local checks.
 
-The first hosted run is still required to validate runner/toolchain compatibility. The hosted image receives updates even though the OS label and action commits are explicit.
+Workflow results establish runner/toolchain compatibility for that run. The hosted image receives updates even though the OS label and action commits are explicit.

@@ -2,6 +2,8 @@
 
 # Ovi Screenshot
 
+[![Windows build](https://github.com/ovidijusr/ovi-screenshot/actions/workflows/windows.yml/badge.svg)](https://github.com/ovidijusr/ovi-screenshot/actions/workflows/windows.yml)
+
 **Native screenshots and screen recording for Windows 11.** Capture an area or a window, keep it in a floating preview, and copy, save, open, or drag the PNG into another app. Record a selected area to MP4 with Pause, Resume, and Stop.
 
 **Development preview · Windows x64 · Build from source.** No prebuilt release yet. Preview packages are unsigned, and license selection is pending.
