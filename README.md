@@ -4,7 +4,7 @@
 
 [![Windows build](https://github.com/ovidijusr/ovi-screenshot/actions/workflows/windows.yml/badge.svg)](https://github.com/ovidijusr/ovi-screenshot/actions/workflows/windows.yml)
 
-**Native screenshots and screen recording for Windows 11.** Capture an area or a window, keep it in a floating preview, and copy, save, open, or drag the PNG into another app. Record an area or window to MP4 with Pause, Resume, and Stop.
+**Native screenshots and screen recording for Windows 11.** Choose a screenshot or video, capture an area or a window, and use the floating preview to copy, save, open, delete, or drag the result. Recordings support Pause, Resume, and Stop.
 
 **Development preview · Windows x64 · Build from source.** No prebuilt release yet. Preview packages are unsigned, and license selection is pending.
 
@@ -13,7 +13,7 @@
 ## What it does
 
 - **Select an area or a window.** Drag a region across one or more monitors, or press Space to pick a window. The selection stays undimmed; window captures preserve available transparency and get a soft generated shadow.
-- **Keep each capture within reach.** Previews stack at the screen edge. Hover for Copy, Save, Delete, and Close; double-click to open the full image, or drag its PNG into another app. Delete removes the app's capture immediately; saved/shared copies stay.
+- **Keep each capture within reach.** PNG screenshots and MP4 recordings save automatically to Pictures/Ovi Screenshot. Previews stack at the screen edge. Hover for Copy, Save, Delete, and Close; double-click to open, or drag the file into another app. Delete removes the capture immediately; independent saved/shared copies stay.
 - **Record an area or a window.** The toolbar appears while you select; drag a selected area to move it, choose FPS and audio options, then press Record. A cancellable countdown, visible boundary, and compact controls follow. Audio starts off; paused time is excluded from the MP4.
 - **Use native Windows controls.** Start from the tray or your chosen shortcut. Menus and settings follow the Windows theme, and preview actions support keyboard focus.
 
@@ -29,9 +29,12 @@ A short, soft sound confirms successful screenshots. Canceling a capture stays s
   </tr>
 </table>
 
-**Recording setup**
+**Capture selector**
 
-<p><img src="docs/assets/recording-setup.png" alt="WinUI recording toolbar with frame rate, audio switches and Record" width="452"></p>
+<p>
+  <img src="docs/assets/capture-setup.png" alt="WinUI selector in screenshot mode" width="420"><br>
+  <img src="docs/assets/recording-setup.png" alt="WinUI selector in video mode, with frame rate, audio switches and Record" width="700">
+</p>
 
 **Recording controls and countdown**
 
@@ -79,7 +82,7 @@ From the repository root in PowerShell:
 
 Bootstrap installs the pinned Rust toolchain under `.tools` without changing global PATH or user profiles. Build compiles the Rust DLL and Windows app and runs the Rust, image-bridge, and synthetic recording checks. [Development instructions](docs/development.md) cover prerequisites, output paths, and the separate native UI fixture.
 
-The app starts in the notification area near the clock. Click the capture-frame icon to select a screenshot area; right-click for recording, Settings, or Quit. The default capture shortcut is **Ctrl+Shift+4**. Existing profiles retain their configured shortcut; change it in Settings → Set key.
+The app starts in the notification area near the clock. Click the capture-frame icon, then choose Screenshot or Video in the selector; right-click for direct capture modes, Settings, or Quit. The default capture shortcut is **Ctrl+Shift+4**. Existing profiles retain their configured shortcut; change it in Settings → Set key.
 
 During selection, **Space** switches between area and window mode and **Escape** cancels. Hover over a preview for its actions, or focus it and use **Ctrl+C**, **Ctrl+S**, **Delete**, and **Escape**. Delete removes the capture; Escape only dismisses its preview. Double-click the image, or press Enter on its focused image, to open it.
 

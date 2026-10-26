@@ -16,6 +16,7 @@ internal static class ServiceSmoke
         await VerifyCaptureSoundAsync();
         await VerifySettingsAsync(paths);
         await VerifyRecordingPreferencesAsync(paths);
+        await CaptureStorageSmoke.VerifyAsync(Path.Combine(paths.Root, "capture-fixture"));
         await LogSmoke.VerifyAsync(Path.Combine(paths.Root, "logs"));
         await VerifyRecoveryLifetimeAsync(paths);
         await VerifyRecordingRecoveryAsync(paths);
@@ -159,6 +160,8 @@ internal static class ServiceSmoke
             await encoder.Completion.WaitAsync(TimeSpan.FromSeconds(10));
             await encoder.CompleteAsync();
         }
+        await VideoPreviewSmoke.VerifyAsync(path, Path.Combine(paths.Root, "video-preview-fixture"), Win32.PointerMonitor().Info.Work);
+        await VerifyRecordingAutoSaveAsync(paths, library, log, path);
         var expected = await library.RememberAsync(path, TimeSpan.FromMilliseconds(200));
         var recovered = await new RecordingLibrary(paths, log).RecoverAsync();
         Require(recovered.Count == 1 && recovered[0].Path == expected.Path && recovered[0].Recovered, "Completed recording was not recovered after reopening its store.");
@@ -206,6 +209,42 @@ internal static class ServiceSmoke
             return ValueTask.FromResult<BgraVideoFrame?>(new BgraVideoFrame(pixels,
                 TimeSpan.FromTicks(frame++ * Mp4FrameEncoder.FrameInterval.Ticks), Mp4FrameEncoder.FrameInterval));
         }
+    }
+
+    private static async Task VerifyRecordingAutoSaveAsync(AppPaths paths, RecordingLibrary library, AppLog log, string generatedVideo)
+    {
+        string cached = library.NewPath();
+        File.Copy(generatedVideo, cached);
+        var pending = await library.RememberAsync(cached, TimeSpan.FromMilliseconds(200));
+        var storage = new CaptureStorage(Path.Combine(paths.Root, "recording-auto-save"));
+        StoredCaptureFile? saved = null;
+        var controller = new RecordingController(DispatcherQueue.GetForCurrentThread(), library, log,
+            error => throw error, _ => Task.FromResult(false),
+            _ => Task.FromResult<IReadOnlyList<StoredRecording>>([pending]), storage);
+        controller.RecordingSaved = (capture, _) => { saved = capture; return Task.CompletedTask; };
+        await controller.RecoverAsync();
+        Require(saved is not null && File.Exists(saved.Path) && !File.Exists(cached) && !controller.HasPendingRecording,
+            "Recovered recording was not automatically saved and released from the cache.");
+        byte[] savedBytes = await File.ReadAllBytesAsync(saved!.Path);
+        byte[] sourceBytes = await File.ReadAllBytesAsync(generatedVideo);
+        Require(savedBytes.AsSpan().SequenceEqual(sourceBytes),
+            "Automatically saved recording did not preserve the source bytes.");
+        await controller.ShutdownAsync();
+
+        string blocked = Path.Combine(paths.Root, "unavailable-destination");
+        await File.WriteAllTextAsync(blocked, "fixture");
+        string retry = library.NewPath();
+        File.Copy(generatedVideo, retry);
+        var retryPending = await library.RememberAsync(retry, TimeSpan.FromMilliseconds(200));
+        var failing = new RecordingController(DispatcherQueue.GetForCurrentThread(), library, log,
+            error => throw error, _ => Task.FromResult(false),
+            _ => Task.FromResult<IReadOnlyList<StoredRecording>>([retryPending]), new CaptureStorage(blocked));
+        await failing.RecoverAsync();
+        Require(failing.HasPendingRecording && File.Exists(retry),
+            "A failed automatic save lost its recoverable recording.");
+        await failing.ShutdownAsync();
+        Require(File.Exists(retry), "Shutdown discarded a recording after automatic save failed.");
+        await library.DeleteAsync(retry);
     }
 
     private static void Require(bool condition, string message)

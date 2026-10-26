@@ -10,6 +10,7 @@ namespace Ovi.Screenshot.Services;
 internal sealed class RecordingController
 {
     private readonly RecordingLibrary _library;
+    private readonly CaptureStorage? _storage;
     private readonly AppLog _log;
     private readonly Action<Exception> _report;
     private readonly Func<CancellationToken, Task<bool>> _confirmDiscard;
@@ -25,18 +26,22 @@ internal sealed class RecordingController
     private Task? _recoveryTask;
     private Task? _shutdownTask;
     private bool _fileActionRunning, _stopping;
+    private Win32.Rect? _previewWorkArea;
 
     internal bool IsActive => _active is not null;
     internal bool IsBusy => _recoveryTask is not { IsCompleted: true } || !_stopTask.IsCompleted || !_stopAndSaveTask.IsCompleted || _fileActionRunning;
     internal bool HasPendingRecording => _pending.Count != 0;
     internal event Action? CaptureRequested;
     internal event Action<bool>? StateChanged;
+    internal Func<StoredCaptureFile, Win32.Rect, Task>? RecordingSaved { get; set; }
 
     internal RecordingController(DispatcherQueue dispatcher, RecordingLibrary library, AppLog log, Action<Exception> report,
         Func<CancellationToken, Task<bool>> confirmDiscard,
-        Func<CancellationToken, Task<IReadOnlyList<StoredRecording>>>? recoverRecordings = null)
+        Func<CancellationToken, Task<IReadOnlyList<StoredRecording>>>? recoverRecordings = null,
+        CaptureStorage? storage = null)
     {
         _library = library; _log = log; _report = report;
+        _storage = storage;
         _confirmDiscard = confirmDiscard;
         _recoverRecordings = recoverRecordings ?? library.RecoverAsync;
         _timer = dispatcher.CreateTimer();
@@ -51,7 +56,16 @@ internal sealed class RecordingController
         try
         {
             var recovered = await _recoverRecordings(_interactive.Token);
-            if (!_stopping) _pending.AddRange(recovered);
+            if (!_stopping)
+            {
+                _pending.AddRange(recovered);
+                if (_storage is not null)
+                    while (_pending.Count > 0 && !_stopping)
+                    {
+                        try { await AutoSaveAsync(); }
+                        catch (Exception error) { _log.Write(error); ShowControl(); _control?.ShowFileActionFailure("Auto-save failed"); break; }
+                    }
+            }
         }
         catch (OperationCanceledException) when (_stopping) { }
     }
@@ -108,6 +122,7 @@ internal sealed class RecordingController
             boundary.Show();
             EnsureDisplayCurrent(display);
             _active = new ActiveRecording(recorder, boundary, path, display, target, topology);
+            _previewWorkArea = display.WorkArea;
             _stopTask = Task.CompletedTask;
             CloseControl();
             ShowControl();
@@ -212,7 +227,8 @@ internal sealed class RecordingController
         try
         {
             await StopAsync();
-            if (!_stopping && HasPendingRecording) await QueueFileAction("Save failed", SaveAsync);
+            if (!_stopping && HasPendingRecording)
+                await QueueFileAction("Auto-save failed", _storage is null ? SaveAsync : AutoSaveAsync);
         }
         catch (Exception error) { _report(error); }
     }
@@ -250,7 +266,7 @@ internal sealed class RecordingController
             if (ReferenceEquals(_active, session)) _active = null;
             AnnounceState(false);
         }
-        if (!_stopping && HasPendingRecording) ShowControl();
+        if (!_stopping && HasPendingRecording && _storage is null) ShowControl();
     }
 
     private Task QueueFileAction(string failureMessage, Func<Task> action)
@@ -264,7 +280,12 @@ internal sealed class RecordingController
     {
         try { await action(); }
         catch (OperationCanceledException) when (_stopping) { }
-        catch (Exception error) { _log.Write(error); _control?.ShowFileActionFailure(failureMessage); }
+        catch (Exception error)
+        {
+            _log.Write(error);
+            if (!_stopping && HasPendingRecording) ShowControl();
+            _control?.ShowFileActionFailure(failureMessage);
+        }
         finally { _fileActionRunning = false; }
     }
 
@@ -286,6 +307,18 @@ internal sealed class RecordingController
         CompletePending(recording);
     }
 
+    private async Task AutoSaveAsync()
+    {
+        var recording = _pending[0];
+        var saved = await _storage!.SaveRecordingAsync(recording.Path);
+        try { await _library.DeleteAsync(recording.Path); }
+        catch (Exception error) { _log.Write(error); }
+        CompletePending(recording, showNext: false);
+        if (_stopping || RecordingSaved is null) return;
+        try { await RecordingSaved(saved, _previewWorkArea ?? Win32.PointerMonitor().Info.Work); }
+        catch (Exception error) { _report(new InvalidOperationException("Recording saved, but its preview could not be opened.", error)); }
+    }
+
     private async Task DiscardAsync()
     {
         var recording = _pending[0];
@@ -294,11 +327,11 @@ internal sealed class RecordingController
         CompletePending(recording);
     }
 
-    private void CompletePending(StoredRecording recording)
+    private void CompletePending(StoredRecording recording, bool showNext = true)
     {
         _pending.Remove(recording);
         CloseControl();
-        if (!_stopping && HasPendingRecording) ShowControl();
+        if (showNext && !_stopping && HasPendingRecording) ShowControl();
     }
 
     private void CloseControl()
@@ -325,6 +358,12 @@ internal sealed class RecordingController
         await StopAsync();
         await _stopAndSaveTask;
         await _fileAction;
+        if (_storage is not null)
+            while (_pending.Count > 0)
+            {
+                try { await AutoSaveAsync(); }
+                catch (Exception error) { _log.Write(error); break; }
+            }
         CloseControl();
         _interactive.Dispose();
     }

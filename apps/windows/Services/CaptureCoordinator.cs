@@ -6,14 +6,16 @@ namespace Ovi.Screenshot.Services;
 
 internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack previews, RecordingController recordings,
     Action<Exception> report, Func<CancellationToken, Task<RecordingOptions>>? recordingOptions = null,
-    Action<RecordingOptions>? saveRecordingOptions = null)
+    Action<RecordingOptions>? saveRecordingOptions = null, CaptureStorage? storage = null)
 {
     private SelectionWindow? _selection;
     private RecordingCountdownWindow? _countdown;
-    private RecordingSetupWindow? _recordingSetup;
+    private CaptureSetupWindow? _captureSetup;
     private CancellationTokenSource? _cancellation;
     private Task _captureTask = Task.CompletedTask;
     private CaptureResult? _lastCapture;
+    private StoredCaptureFile? _lastScreenshotFile;
+    private VideoPreview? _lastVideo;
     private bool _stopping, _lastWasRecording;
 
     internal void Screenshot() => BeginCapture(recordVideo: false);
@@ -47,35 +49,34 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
             var topology = DisplayTopology.Enumerate();
             if (!Win32.GetCursorPos(out var pointer)) throw new InvalidOperationException("The pointer position is unavailable.");
             var initialMonitor = topology.AtPoint(pointer);
-            Task<RecordingOptions>? initialOptions = recordVideo ? RecordingOptionsAsync(cancellation.Token) : null;
-            Task<AudioDeviceCatalog>? audioDevices = recordVideo ? AudioDevicesAsync(cancellation.Token) : null;
+            Task<RecordingOptions> initialOptions = RecordingOptionsAsync(cancellation.Token);
+            Task<AudioDeviceCatalog> audioDevices = AudioDevicesAsync(cancellation.Token);
             var display = await DesktopCapture.AcquireAsync(topology, cancellation.Token);
             var pixels = display.PremultipliedBgra ?? await Task.Run(() => BitmapSources.ToPremultipliedBgra(display.Rgba), cancellation.Token);
             IReadOnlyList<WindowCaptureTarget> windows = await Task.Run(WindowTargets.Enumerate, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
             EnsureDisplaysUnchanged(topology);
-            RecordingOptions? initial = recordVideo ? await initialOptions! : null;
+            RecordingOptions initial = await initialOptions;
             cancellation.Token.ThrowIfCancellationRequested();
 
             var selection = new SelectionWindow(display, topology.Bounds, pixels, windows,
                 controlsBounds: initialMonitor.WorkArea,
-                areaLimits: recordVideo ? topology.Monitors.Select(monitor => monitor.Bounds).ToArray() : null,
-                confirmSelection: recordVideo);
+                areaLimits: topology.Monitors.Select(monitor => monitor.Bounds).ToArray(),
+                confirmSelection: true, initialVideo: recordVideo);
             _selection = selection;
             Task<PixelSelection?> selected = selection.SelectAsync();
             RecordingOptions? options = null;
-            if (recordVideo)
+            bool selectedVideo = recordVideo;
+            if (!selected.IsCompleted)
             {
-                if (!selected.IsCompleted)
-                {
-                    var toolbar = ShowRecordingToolbar(selection, initialMonitor.WorkArea, initial!, chosen => options = chosen);
-                    _ = RefreshToolbarDevicesAsync(toolbar, audioDevices!, selected);
-                }
-                else _ = ObservePreparationAsync(audioDevices!);
+                var toolbar = ShowCaptureToolbar(selection, initialMonitor.WorkArea, initial, recordVideo,
+                    video => selectedVideo = video, chosen => options = chosen);
+                _ = RefreshToolbarDevicesAsync(toolbar, audioDevices, selected);
             }
+            else _ = ObservePreparationAsync(audioDevices);
             PixelSelection? region = await selected;
             WindowCaptureTarget? window = selection.SelectedWindow;
-            _recordingSetup?.CloseSafely(); _recordingSetup = null;
+            _captureSetup?.CloseSafely(); _captureSetup = null;
             _selection = null;
             cancellation.Token.ThrowIfCancellationRequested();
             if (region is null)
@@ -89,9 +90,10 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
             if (!SelectionCoordinates.IncludesDisplayPixels(topology, desktopRegion))
                 throw new InvalidOperationException("Select an area that includes a display.");
 
-            if (recordVideo)
+            if (selectedVideo)
             {
                 if (options is null) throw new InvalidOperationException("Choose Record to start a video.");
+                if (recordings.HasPendingRecording || recordings.IsBusy) { recordings.ShowControl(); return; }
                 var placement = window is null ? SelectionCoordinates.RecordingMonitor(topology, desktopRegion)
                     : topology.ForRectangle(window.Bounds);
                 saveRecordingOptions?.Invoke(options);
@@ -133,11 +135,21 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
             {
                 var placement = topology.ForRectangle(window?.Bounds ?? desktopRegion);
                 _lastCapture = await CreateScreenshotAsync(display, region.Value, window, placement.WorkArea, cancellation.Token);
-                cancellation.Token.ThrowIfCancellationRequested();
+                _lastScreenshotFile = null;
+                if (storage is not null)
+                {
+                    // A completed capture is accepted work: finish its save even if quit begins.
+                    try { _lastScreenshotFile = await storage.SaveScreenshotAsync(await _lastCapture.ReadPngAsync()); }
+                    catch (Exception error)
+                    {
+                        var failure = new InvalidOperationException("Screenshot could not be saved automatically. Use Save in the preview.", error);
+                        if (_stopping) AppLog.Shared.Write(failure); else report(failure);
+                    }
+                }
                 _lastWasRecording = false;
                 if (!_stopping)
                 {
-                    previews.Show(_lastCapture);
+                    previews.Show(_lastCapture, _lastScreenshotFile is { } savedFile ? savedFile.DeleteAsync : null, _lastScreenshotFile?.Path);
                     CaptureSound.Play();
                 }
             }
@@ -147,7 +159,7 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
         catch (Exception error) { if (!_stopping) report(error); }
         finally
         {
-            _recordingSetup?.CloseSafely(); _recordingSetup = null;
+            _captureSetup?.CloseSafely(); _captureSetup = null;
             _selection?.Cancel(); _selection = null;
             _countdown?.Cancel(); _countdown = null;
             _cancellation = null;
@@ -174,19 +186,26 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
         catch (Exception error) { AppLog.Shared.Write(error); }
     }
 
-    private RecordingSetupWindow ShowRecordingToolbar(SelectionWindow selection, Win32.Rect workArea,
-        RecordingOptions initial, Action<RecordingOptions> choose)
+    private CaptureSetupWindow ShowCaptureToolbar(SelectionWindow selection, Win32.Rect workArea,
+        RecordingOptions initial, bool initialVideo, Action<bool> modeChanged, Action<RecordingOptions> choose)
     {
         var placement = new Win32.Rect { Left = workArea.Left, Right = workArea.Right, Top = workArea.Top, Bottom = workArea.Top };
-        var toolbar = new RecordingSetupWindow(placement, workArea, initial, new AudioDeviceCatalog([], []));
-        _recordingSetup = toolbar;
+        var toolbar = new CaptureSetupWindow(placement, workArea, initial, new AudioDeviceCatalog([], []), initialVideo: initialVideo);
+        _captureSetup = toolbar;
         toolbar.AttachOwner(selection.Handle);
         selection.SetToolbarHandle(toolbar.Handle);
-        selection.SelectionChanged += toolbar.SetCanRecord;
+        selection.SelectionChanged += toolbar.SetCanCapture;
         selection.Activated += toolbar.RaiseWithoutActivation;
         selection.ToolbarRequested += toolbar.ActivateForKeyboard;
         selection.Closing += toolbar.CloseSafely;
         toolbar.FocusSelectionRequested += selection.FocusSelection;
+        toolbar.VideoModeChanged += video => { selection.SetVideoMode(video); modeChanged(video); };
+        toolbar.ScreenshotRequested += () =>
+        {
+            if (!selection.HasSelection) return;
+            toolbar.CloseSafely();
+            selection.ConfirmSelection();
+        };
         toolbar.RecordRequested += chosen =>
         {
             if (!selection.HasSelection) return;
@@ -195,12 +214,13 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
             selection.ConfirmSelection();
         };
         toolbar.CancelRequested += () => { toolbar.CloseSafely(); selection.Cancel(); };
+        toolbar.SetVideoAvailable(!recordings.HasPendingRecording);
         toolbar.ShowForSelection();
-        toolbar.SetCanRecord(selection.HasSelection);
+        toolbar.SetCanCapture(selection.HasSelection);
         return toolbar;
     }
 
-    private static async Task RefreshToolbarDevicesAsync(RecordingSetupWindow toolbar, Task<AudioDeviceCatalog> devices,
+    private static async Task RefreshToolbarDevicesAsync(CaptureSetupWindow toolbar, Task<AudioDeviceCatalog> devices,
         Task<PixelSelection?> selected)
     {
         try
@@ -262,21 +282,37 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
     internal void ReopenLast()
     {
         if (_stopping || !_captureTask.IsCompleted) return;
-        if (_lastWasRecording || (_lastCapture is null && recordings.HasPendingRecording)) recordings.ShowControl();
-        else if (_lastCapture is { IsDeleted: false }) previews.Show(_lastCapture);
+        if (recordings.IsActive || recordings.HasPendingRecording) recordings.ShowControl();
+        else if (_lastWasRecording && _lastVideo is { IsDeleted: false }) previews.Show(_lastVideo);
+        else if (_lastCapture is { IsDeleted: false })
+            previews.Show(_lastCapture, _lastScreenshotFile is { } savedFile ? savedFile.DeleteAsync : null, _lastScreenshotFile?.Path);
     }
 
     internal void Forget(CaptureResult capture)
     {
         if (_lastCapture is not null && ReferenceEquals(_lastCapture.PngStorageIdentity, capture.PngStorageIdentity))
-            _lastCapture = null;
+        { _lastCapture = null; _lastScreenshotFile = null; }
+    }
+
+    internal async Task ShowSavedRecordingAsync(StoredCaptureFile saved, Win32.Rect workArea)
+    {
+        var video = await VideoPreview.CreateAsync(saved.Path, workArea, saved.DeleteAsync);
+        if (_stopping) return;
+        _lastVideo = video;
+        _lastWasRecording = true;
+        previews.Show(video);
+    }
+
+    internal void ForgetVideo(VideoPreview video)
+    {
+        if (ReferenceEquals(_lastVideo, video)) _lastVideo = null;
     }
 
     internal async Task StopAsync()
     {
         _stopping = true;
         _cancellation?.Cancel();
-        _recordingSetup?.CloseSafely(); _selection?.Cancel(); _countdown?.Cancel();
+        _captureSetup?.CloseSafely(); _selection?.Cancel(); _countdown?.Cancel();
         await _captureTask;
     }
 }

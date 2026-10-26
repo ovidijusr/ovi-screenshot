@@ -1,4 +1,5 @@
 using Ovi.Screenshot.Native;
+using System.Runtime.CompilerServices;
 using Windows.Graphics;
 
 namespace Ovi.Screenshot.Views;
@@ -8,6 +9,8 @@ internal sealed class PreviewStack
     internal const long ResidentPngBudget = 64L * 1024 * 1024;
     private readonly List<PreviewWindow> _windows = [];
     private readonly HashSet<object> _deleting = new(ReferenceEqualityComparer.Instance);
+    private readonly ConditionalWeakTable<object, OwnedFileDeletion> _ownedFiles = new();
+    private readonly Func<CaptureResult, Task> _deletePayload;
     private int _suspended;
     private bool _arranging, _stopping, _cacheRequested;
     private Task _cacheWork = Task.CompletedTask;
@@ -18,10 +21,29 @@ internal sealed class PreviewStack
     internal long ResidentPngBytes => Windows.Select(window => window.Capture).DistinctBy(capture => capture.PngStorageIdentity).Sum(capture => capture.ResidentPngBytes);
     internal event Action<Exception>? Failed;
     internal event Action<CaptureResult>? Deleted;
+    internal event Action<VideoPreview>? VideoDeleted;
 
-    internal void Show(CaptureResult capture)
+    internal PreviewStack(Func<CaptureResult, Task>? deletePayload = null)
+        => _deletePayload = deletePayload ?? (capture => capture.DeleteAsync());
+
+    internal void Show(CaptureResult capture, Func<Task>? deleteOwnedFile = null, string? ownedFilePath = null)
+        => ShowCore(capture, null, deleteOwnedFile, ownedFilePath);
+
+    internal void Show(VideoPreview video)
+    {
+        ArgumentNullException.ThrowIfNull(video);
+        if (!video.IsDeleted) ShowCore(video.Thumbnail, video, null, null);
+    }
+
+    private void ShowCore(CaptureResult capture, VideoPreview? video, Func<Task>? deleteOwnedFile, string? ownedFilePath)
     {
         if (_stopping || capture.IsDeleted || _deleting.Contains(capture.PngStorageIdentity)) return;
+        if (deleteOwnedFile is not null)
+        {
+            if (_ownedFiles.TryGetValue(capture.PngStorageIdentity, out var existingFile))
+                existingFile.Path ??= ownedFilePath;
+            else _ownedFiles.Add(capture.PngStorageIdentity, new OwnedFileDeletion(deleteOwnedFile, ownedFilePath));
+        }
         var existing = _windows.FirstOrDefault(window => !window.IsClosed && ReferenceEquals(window.Capture, capture));
         if (existing is not null)
         {
@@ -29,7 +51,7 @@ internal sealed class PreviewStack
             return;
         }
 
-        var preview = new PreviewWindow(capture, this);
+        var preview = new PreviewWindow(capture, this, video);
         _windows.Add(preview);
         preview.LayoutChanged += Arrange;
         preview.Failed += ReportFailure;
@@ -45,6 +67,12 @@ internal sealed class PreviewStack
         if (_suspended == 0) preview.ShowWithoutActivation();
         RequestCacheTrim();
     }
+
+    internal string? SavedPath(CaptureResult capture) =>
+        _ownedFiles.TryGetValue(capture.PngStorageIdentity, out var owned) ? owned.Path : null;
+
+    internal bool IsSavedFile(CaptureResult capture, string path) => SavedPath(capture) is { } saved &&
+        StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(path), Path.GetFullPath(saved));
 
     internal bool CanDelete(CaptureResult capture)
     {
@@ -75,9 +103,17 @@ internal sealed class PreviewStack
                 if (operation is null) return;
                 reservations.Add((window, operation));
             }
-            await capture.DeleteAsync();
+            if (requester.Video is { } video) await video.DeleteOwnedFileAsync();
+            else if (_ownedFiles.TryGetValue(identity, out var owned)) await owned.DeleteAsync();
+            await _deletePayload(capture);
+            _ownedFiles.Remove(identity);
             try { Deleted?.Invoke(capture); }
             catch (Exception error) { ReportFailure(error); }
+            if (requester.Video is { } removed)
+            {
+                try { VideoDeleted?.Invoke(removed); }
+                catch (Exception error) { ReportFailure(error); }
+            }
         }
         finally
         {
@@ -165,6 +201,12 @@ internal sealed class PreviewStack
         System.Diagnostics.Trace.WriteLine(error);
         try { Failed?.Invoke(error); }
         catch (Exception reportingError) { System.Diagnostics.Trace.WriteLine(reportingError); }
+    }
+
+    private sealed class OwnedFileDeletion(Func<Task> deleteAsync, string? path)
+    {
+        internal Func<Task> DeleteAsync { get; } = deleteAsync;
+        internal string? Path { get; set; } = path;
     }
 
     private void Arrange()

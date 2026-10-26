@@ -89,9 +89,11 @@ Ovi Screenshot $Version - Windows 11 x64 preview
 Extract the entire ZIP to a writable folder, then run Ovi.Screenshot.exe.
 Keep all included files together. The app starts in the notification area.
 
-Click the tray icon or press Ctrl+Shift+4 to select a screenshot area.
+Click the tray icon or press Ctrl+Shift+4, then choose Screenshot or Video.
+Draw an area or press Space to choose a window, then Capture or Record.
 Escape cancels. Hover over a preview for Copy, Save, Delete and Close.
-Delete removes the capture without confirmation; saved/shared copies stay.
+Screenshots and recordings save to Pictures\Ovi Screenshot automatically.
+Delete removes that saved capture; independent saved/shared copies stay.
 A short, soft sound confirms each successful screenshot.
 Right-click the tray icon for recording, Settings, and Quit.
 Use Settings > Set key to configure a different capture shortcut.
@@ -101,7 +103,7 @@ or automatic updates. The .NET and Windows App SDK runtimes are bundled.
 The app stores preferences and caches in %LOCALAPPDATA%\OviScreenshot;
 moving or replacing this program folder does not reset those preferences.
 Recording supports areas/windows and optional system sound and microphone.
-Choose FPS and audio devices in Settings. Audio defaults off.
+Choose FPS and audio devices on the capture toolbar. Audio defaults off.
 macOS and the annotation editor are not included.
 
 Quit the app before replacing it. To remove the program, quit and delete

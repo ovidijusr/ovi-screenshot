@@ -23,8 +23,10 @@ internal sealed class SelectionWindow
     private static ushort _classAtom;
     private readonly CapturedDisplay _capture;
     private readonly Win32.Rect _bounds;
-    private readonly IReadOnlyList<Win32.Rect>? _areaLimits;
+    private readonly IReadOnlyList<Win32.Rect>? _monitorLimits;
     private readonly bool _confirmSelection;
+    private bool _videoMode;
+    private IReadOnlyList<Win32.Rect>? AreaLimits => _videoMode ? _monitorLimits : null;
     private Win32.Rect? _activeAreaLimit;
     private readonly IReadOnlyList<WindowCaptureTarget> _windows;
     private readonly NativeCaptureBitmap _source, _buffer;
@@ -62,14 +64,14 @@ internal sealed class SelectionWindow
 
     internal SelectionWindow(CapturedDisplay capture, Win32.Rect bounds, byte[]? preparedBgra = null,
         IReadOnlyList<WindowCaptureTarget>? windows = null, Win32.Rect? controlsBounds = null,
-        IReadOnlyList<Win32.Rect>? areaLimits = null, bool confirmSelection = false)
+        IReadOnlyList<Win32.Rect>? areaLimits = null, bool confirmSelection = false, bool initialVideo = true)
     {
         if (bounds.Width <= 0 || bounds.Height <= 0) throw new ArgumentOutOfRangeException(nameof(bounds));
-        _capture = capture; _bounds = bounds; _confirmSelection = confirmSelection;
+        _capture = capture; _bounds = bounds; _confirmSelection = confirmSelection; _videoMode = initialVideo;
         Win32.Rect controls = ClipWindow(controlsBounds ?? bounds, bounds);
         if (controls.Width <= 0 || controls.Height <= 0) throw new ArgumentException("Selection controls must be inside the captured desktop.", nameof(controlsBounds));
-        _areaLimits = areaLimits?.Select(limit => ClipWindow(limit, bounds)).Where(limit => limit.Width > 0 && limit.Height > 0).ToArray();
-        if (_areaLimits is { Count: 0 }) throw new ArgumentException("Recording selection requires an available display.", nameof(areaLimits));
+        _monitorLimits = areaLimits?.Select(limit => ClipWindow(limit, bounds)).Where(limit => limit.Width > 0 && limit.Height > 0).ToArray();
+        if (_monitorLimits is { Count: 0 }) throw new ArgumentException("Recording selection requires an available display.", nameof(areaLimits));
         _windows = windows?.Where(target => target.Handle != 0 && ClipWindow(target.Bounds, bounds) is { Width: > 0, Height: > 0 }).ToArray() ?? [];
         byte[] pixels = preparedBgra ?? capture.PremultipliedBgra ?? BitmapSources.ToPremultipliedBgra(capture.Rgba);
         _source = NativeCaptureBitmap.FromBgra(capture.Width, capture.Height, pixels);
@@ -82,7 +84,7 @@ internal sealed class SelectionWindow
             RegisterClass();
             _window = Native.CreateWindowEx(0x00000008 | 0x00000080 | 0x00010000, ClassName,
                 confirmSelection
-                    ? "Select recording area. Drag or use arrows and Enter. Space selects a window. Tab opens recording controls. Escape cancels."
+                    ? "Select an area. Drag or use arrows and Enter. Space selects a window. Tab opens capture controls. Escape cancels."
                     : "Select capture area. Drag or use arrows and Enter. Space selects a window. Escape cancels.", 0x80000000 | 0x02000000,
                 controls.Left, controls.Top, controls.Width, controls.Height, 0, 0, Native.GetModuleHandle(null), 0);
             if (_window == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -163,6 +165,46 @@ internal sealed class SelectionWindow
         if (!_confirmSelection || _complete || !_shown || _window == 0) return;
         if (Native.SetForegroundWindow(_window)) _hadForeground = true;
         Native.SetFocus(_window);
+    }
+
+    internal void SetVideoMode(bool video)
+    {
+        if (!_confirmSelection || _complete || _videoMode == video) return;
+        ChangeVisuals(() =>
+        {
+            ClearPointerCapture();
+            _videoMode = video;
+            _activeAreaLimit = null;
+            if (_windowMode) return;
+            if (!_selectionReady) { ResetAreaAnchor(); return; }
+            if (!video) return;
+            PixelSelection area = CurrentSelection();
+            if (TryLimitForArea(area, out var limit))
+                _activeAreaLimit = limit;
+            else
+            {
+                SetSelectionReady(false);
+                ResetAreaAnchor();
+            }
+        });
+        NotifySelectionChanged();
+        Announce();
+    }
+
+    private bool TryLimitForArea(PixelSelection area, out Win32.Rect? limit)
+    {
+        limit = null;
+        if (AreaLimits is null) return true;
+        foreach (var monitor in AreaLimits)
+        {
+            if (TryLatchAreaLimit([monitor], _bounds, _capture.Width, _capture.Height, area.X, area.Y, out var candidate)
+                && candidate is { } bounds && (long)area.X + area.Width <= bounds.Right && (long)area.Y + area.Height <= bounds.Bottom)
+            {
+                limit = bounds;
+                return true;
+            }
+        }
+        return false;
     }
 
     internal void ConfirmSelection()
@@ -377,15 +419,15 @@ internal sealed class SelectionWindow
         {
             string title = (_selectionReady ? SelectedWindow : CurrentWindow())?.Title ?? "Point at a window";
             Native.SetWindowText(_window, _confirmSelection
-                ? $"Window recording. {title}. {(_selectionReady ? "Use Record to start." : "Enter selects. Arrows choose a window.")} Space returns to area. Escape cancels."
+                ? $"Window {(_videoMode ? "recording" : "capture")}. {title}. {(_selectionReady ? _videoMode ? "Use Record to start." : "Use Capture to take a screenshot." : "Enter selects. Arrows choose a window.")} Space returns to area. Escape cancels."
                 : $"Window capture. {title}. Enter captures. Arrows choose a window. Space returns to area. Escape cancels.");
             Native.NotifyWinEvent(0x800C, _window, 0, 0);
             return;
         }
         var selection = CurrentSelection();
-        bool inGap = !_anchored && !TryLatchAreaLimit(_areaLimits, _bounds, _capture.Width, _capture.Height, _currentX, _currentY, out _);
+        bool inGap = !_anchored && !TryLatchAreaLimit(AreaLimits, _bounds, _capture.Width, _capture.Height, _currentX, _currentY, out _);
         Native.SetWindowText(_window, inGap ? "Move the selection cursor onto a display. Enter sets a corner. Escape cancels."
-            : _anchored ? $"Selected area {selection.Width} by {selection.Height} pixels. {(_confirmSelection ? _selectionReady ? "Use Record to start." : "Move and press Enter to select." : "Enter captures.")} Escape cancels."
+            : _anchored ? $"Selected area {selection.Width} by {selection.Height} pixels. {(_confirmSelection ? _selectionReady ? _videoMode ? "Use Record to start." : "Use Capture to take a screenshot." : "Move and press Enter to select." : "Enter captures.")} Escape cancels."
             : $"Selection cursor {_currentX}, {_currentY}. Enter sets a corner. Escape cancels.");
         Native.NotifyWinEvent(0x800C, _window, 0, 0);
     }
@@ -406,7 +448,7 @@ internal sealed class SelectionWindow
 
     private bool TryAnchorCurrent()
     {
-        if (!TryLatchAreaLimit(_areaLimits, _bounds, _capture.Width, _capture.Height, _currentX, _currentY, out var limit)) return false;
+        if (!TryLatchAreaLimit(AreaLimits, _bounds, _capture.Width, _capture.Height, _currentX, _currentY, out var limit)) return false;
         _activeAreaLimit = limit;
         SetSourcePoint(_currentX, _currentY);
         _anchorX = _currentX; _anchorY = _currentY; _anchored = true;
@@ -727,6 +769,7 @@ internal sealed class SelectionWindow
         Require(Contains(movable, 100, 700) && Contains(movable, 499, 999) && !Contains(movable, 500, 999),
             "only points inside the selected area start a move");
         VerifySyntheticMoveLifecycle();
+        VerifySyntheticModeSwitching();
 
         bool InsideWork(Win32.Rect viewport, Win32.Rect work) => viewport.Left + desktop.Left >= work.Left &&
             viewport.Right + desktop.Left <= work.Right && viewport.Top + desktop.Top >= work.Top && viewport.Bottom + desktop.Top <= work.Bottom;
@@ -791,6 +834,64 @@ internal sealed class SelectionWindow
             picker.ConfirmSelection();
             if (!picker._completion.Task.IsCompletedSuccessfully || !ReferenceEquals(picker.SelectedWindow, target))
                 throw new InvalidOperationException("Record did not confirm the selected window.");
+        }
+        finally { picker.Cancel(); }
+    }
+
+    private static void VerifySyntheticModeSwitching()
+    {
+        const int width = 320, height = 200;
+        byte[] pixels = new byte[width * height * 4];
+        for (int offset = 3; offset < pixels.Length; offset += 4) pixels[offset] = 255;
+        var display = CapturedDisplay.FromOpaqueBgra(width, height, pixels);
+        var desktop = new Win32.Rect { Left = -320, Top = -200, Right = 0, Bottom = 0 };
+        var left = new Win32.Rect { Left = -320, Top = -200, Right = -160, Bottom = 0 };
+        var right = new Win32.Rect { Left = -160, Top = -200, Right = 0, Bottom = 0 };
+        var selector = new SelectionWindow(display, desktop, pixels, areaLimits: [left, right],
+            confirmSelection: true, initialVideo: false);
+        try
+        {
+            selector.SetCurrent(20, 30);
+            if (!selector.TryAnchorCurrent()) throw new InvalidOperationException("Could not anchor screenshot selection.");
+            selector.SetCurrent(200, 90);
+            selector.SetSelectionReady(true);
+            if (!selector.HasSelection || selector.CurrentSelection().Width != 180)
+                throw new InvalidOperationException("Screenshot selection did not span both displays.");
+            selector.SetVideoMode(true);
+            if (selector.HasSelection || selector._anchored)
+                throw new InvalidOperationException("A cross-display region remained selected for video.");
+            selector.SetVideoMode(false);
+            selector.SetCurrent(20, 30);
+            if (!selector.TryAnchorCurrent()) throw new InvalidOperationException("Could not re-anchor screenshot selection.");
+            selector.SetCurrent(100, 90);
+            selector.SetSelectionReady(true);
+            selector.SetVideoMode(true);
+            if (!selector.HasSelection || selector._activeAreaLimit is not { Left: 0, Right: 160 } ||
+                selector.CurrentSelection() != new PixelSelection(20, 30, 80, 60))
+                throw new InvalidOperationException("A valid selection was not retained when switching to video.");
+            selector.SetVideoMode(false);
+            if (!selector.HasSelection || selector._activeAreaLimit is not null)
+                throw new InvalidOperationException("Switching back to screenshot did not release the display limit.");
+            selector.ApplyMovedArea(ClampMovedArea(selector.CurrentSelection(), 100, 0,
+                new Win32.Rect { Right = width, Bottom = height }));
+            if (selector.CurrentSelection() != new PixelSelection(120, 30, 80, 60))
+                throw new InvalidOperationException("Screenshot selection could not be moved across displays.");
+            selector.SetVideoMode(true);
+            if (selector.HasSelection)
+                throw new InvalidOperationException("A screenshot moved across displays was accepted for video.");
+        }
+        finally { selector.Cancel(); }
+
+        var target = new WindowCaptureTarget(new nint(1), new Win32.Rect { Left = -300, Top = -160, Right = -120, Bottom = -60 }, "Generated window");
+        var picker = new SelectionWindow(display, desktop, pixels, windows: [target], areaLimits: [left, right],
+            confirmSelection: true, initialVideo: false);
+        try
+        {
+            picker._windowMode = true; picker._windowIndex = 0;
+            picker.ConfirmWindow();
+            picker.SetVideoMode(true);
+            if (!picker.HasSelection || !ReferenceEquals(picker.SelectedWindow, target))
+                throw new InvalidOperationException("Switching capture mode lost the selected native window.");
         }
         finally { picker.Cancel(); }
     }

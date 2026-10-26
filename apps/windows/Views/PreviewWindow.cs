@@ -18,6 +18,7 @@ namespace Ovi.Screenshot.Views;
 internal sealed class PreviewWindow : Window
 {
     private readonly CaptureResult _capture;
+    private readonly VideoPreview? _video;
     private readonly PreviewStack _owner;
     private readonly nint _window;
     private readonly Grid _surface = new();
@@ -26,6 +27,7 @@ internal sealed class PreviewWindow : Window
     private readonly Border _controlHost;
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     private readonly Border _statusHost;
+    private readonly Border? _playBadge;
     private readonly Button _copy;
     private readonly Button _save;
     private readonly Button _delete;
@@ -45,6 +47,7 @@ internal sealed class PreviewWindow : Window
     private bool _closed, _pointerInside, _closePending, _windowActive, _keyboardMode, _displayRefreshQueued, _refreshingDisplay;
 
     internal CaptureResult Capture => _capture;
+    internal VideoPreview? Video => _video;
     internal SizeInt32 PixelSize => AppWindow.Size;
     internal bool IsClosed => _closed;
     internal bool IsCaptureExcluded { get; }
@@ -53,10 +56,10 @@ internal sealed class PreviewWindow : Window
     internal event Action? LayoutChanged;
     internal event Action<Exception>? Failed;
 
-    internal PreviewWindow(CaptureResult capture, PreviewStack owner)
+    internal PreviewWindow(CaptureResult capture, PreviewStack owner, VideoPreview? video = null)
     {
-        _capture = capture; _owner = owner;
-        Title = "Screenshot preview — Ovi Screenshot";
+        _capture = capture; _owner = owner; _video = video;
+        Title = video is null ? "Screenshot preview — Ovi Screenshot" : "Recording preview — Ovi Screenshot";
         _window = WinRT.Interop.WindowNative.GetWindowHandle(this);
         AppWindow.IsShownInSwitchers = false;
         AppWindow.TitleBar.PreferredTheme = TitleBarTheme.UseDefaultAppMode;
@@ -76,19 +79,38 @@ internal sealed class PreviewWindow : Window
             Stretch = Stretch.Uniform, CanDrag = true, IsTabStop = true,
             HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch
         };
-        AutomationProperties.SetName(_thumbnail, "Screenshot. Double-click or press Enter to open. Drag to another app, or use Copy, Save and Delete.");
-        AutomationProperties.SetAutomationId(_thumbnail, "ScreenshotThumbnail");
+        AutomationProperties.SetName(_thumbnail, video is null
+            ? "Screenshot. Double-click or press Enter to open. Drag to another app, or use Copy, Save and Delete."
+            : "Recording. Double-click or press Enter to play. Drag to another app, or use Copy, Save and Delete.");
+        AutomationProperties.SetAutomationId(_thumbnail, video is null ? "ScreenshotThumbnail" : "RecordingThumbnail");
         _thumbnail.PointerPressed += (_, _) => _thumbnail.Focus(FocusState.Pointer);
         _thumbnail.DoubleTapped += (_, args) => { args.Handled = true; _ = OpenAsync(); };
-        ToolTipService.SetToolTip(_thumbnail, "Double-click to open");
+        ToolTipService.SetToolTip(_thumbnail, video is null ? "Double-click to open" : "Double-click to play");
         _thumbnail.DragStarting += DragStarting;
         _thumbnail.DropCompleted += DropCompleted;
         _surface.Children.Add(_thumbnail);
 
-        _copy = IconButton("\uE8C8", "Copy screenshot", "CopyScreenshot", "Copy (Ctrl+C)");
-        _save = IconButton("\uE74E", "Save screenshot", "SaveScreenshot", "Save (Ctrl+S)");
-        _delete = IconButton("\uE74D", "Delete screenshot", "DeleteScreenshot", "Delete screenshot (Delete)");
-        _dismiss = IconButton("\uE8BB", "Dismiss screenshot preview", "DismissPreview", "Dismiss (Esc)");
+        if (video is not null)
+        {
+            var play = new Border
+            {
+                Child = new FontIcon { Glyph = "\uE768", FontSize = 18,
+                    Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"] },
+                Background = (Brush)Application.Current.Resources["AcrylicBackgroundFillColorDefaultBrush"],
+                Width = 40, Height = 40, CornerRadius = new CornerRadius(20), Opacity = .92,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                IsHitTestVisible = false
+            };
+            AutomationProperties.SetAutomationId(play, "RecordingPlayBadge");
+            _playBadge = play;
+            _surface.Children.Add(play);
+        }
+
+        string kind = video is null ? "screenshot" : "recording";
+        _copy = IconButton("\uE8C8", $"Copy {kind}", video is null ? "CopyScreenshot" : "CopyRecording", "Copy (Ctrl+C)");
+        _save = IconButton("\uE74E", $"Save {kind}", video is null ? "SaveScreenshot" : "SaveRecording", "Save (Ctrl+S)");
+        _delete = IconButton("\uE74D", $"Delete {kind}", video is null ? "DeleteScreenshot" : "DeleteRecording", $"Delete {kind} (Delete)");
+        _dismiss = IconButton("\uE8BB", $"Dismiss {kind} preview", "DismissPreview", "Dismiss (Esc)");
         _copy.Click += async (_, _) => await CopyAsync();
         _save.Click += async (_, _) => await SaveAsync();
         _delete.Click += async (_, _) => await DeleteAsync();
@@ -260,7 +282,7 @@ internal sealed class PreviewWindow : Window
 
     internal void ShowWithoutActivation()
     {
-        if (_closed || _capture.IsDeleted) return;
+        if (_closed || _capture.IsDeleted || _video?.IsDeleted == true) return;
         _pointerInside = false;
         UpdateControls();
         if (!_closed) AppWindow.Show(false);
@@ -300,6 +322,12 @@ internal sealed class PreviewWindow : Window
         _controlHost.Opacity = Win32.IsHighContrast ? 1 : .92;
         _statusHost.Background = (Brush)Application.Current.Resources["SolidBackgroundFillColorBaseBrush"];
         _status.Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+        if (_playBadge is not null)
+        {
+            _playBadge.Background = (Brush)Application.Current.Resources["AcrylicBackgroundFillColorDefaultBrush"];
+            _playBadge.Opacity = Win32.IsHighContrast ? 1 : .92;
+            ((FontIcon)_playBadge.Child).Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+        }
     }
 
     private bool HasFocusWithin()
@@ -319,9 +347,9 @@ internal sealed class PreviewWindow : Window
         if (_closed) return;
         bool visible = _pointerInside || (_keyboardMode && HasFocusWithin()) || IsBusy;
         _controls.Visibility = _controlHost.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        bool available = _operations.IsAccepting && !IsBusy && !_capture.IsDeleted;
+        bool available = _operations.IsAccepting && !IsBusy && !_capture.IsDeleted && _video?.IsDeleted != true;
         _copy.IsEnabled = _save.IsEnabled = available;
-        _delete.IsEnabled = available && _owner.CanDelete(_capture);
+        _delete.IsEnabled = _operations.IsAccepting && !IsBusy && _owner.CanDelete(_capture);
         if (_dragOperation is null) _thumbnail.CanDrag = available;
         if (_reportedBusy != IsBusy)
         {
@@ -361,8 +389,15 @@ internal sealed class PreviewWindow : Window
             _dragPreparation = new CancellationTokenSource();
             ClearFeedback(); UpdateControls();
             args.AllowedOperations = DataPackageOperation.Copy;
-            byte[] png = await _capture.ReadPngAsync(_dragPreparation.Token);
-            await PreviewDragData.PrepareAsync(args.Data, png, _dragPreparation.Token);
+            if (_video is null)
+            {
+                byte[] png = await _capture.ReadPngAsync(_dragPreparation.Token);
+                await PreviewDragData.PrepareAsync(args.Data, png, _dragPreparation.Token);
+            }
+            else
+            {
+                await _video.PrepareDataAsync(args.Data, _dragPreparation.Token);
+            }
             if (!_operations.IsAccepting) args.Cancel = true;
         }
         catch (OperationCanceledException) when (!_operations.IsAccepting) { args.Cancel = true; }
@@ -400,6 +435,17 @@ internal sealed class PreviewWindow : Window
 
     private Task OpenAsync() => RunOperationAsync("Open failed", async () =>
     {
+        string? savedPath = _video?.Path ?? _owner.SavedPath(_capture);
+        if (savedPath is not null)
+        {
+            CancellationToken token = _interactiveCancellation.Token;
+            var file = await StorageFile.GetFileFromPathAsync(savedPath).AsTask(token);
+            Activate();
+            if (!await Windows.System.Launcher.LaunchFileAsync(file).AsTask(token))
+                throw new InvalidOperationException("Windows could not open the saved capture.");
+            _closePending = true;
+            return;
+        }
         if (_openFile is null || !File.Exists(_openFile.Path))
         {
             byte[] png = await _capture.ReadPngAsync();
@@ -415,6 +461,14 @@ internal sealed class PreviewWindow : Window
 
     private Task CopyAsync() => RunOperationAsync("Copy failed", async () =>
     {
+        if (_video is not null)
+        {
+            var videoPackage = new DataPackage();
+            await _video.PrepareDataAsync(videoPackage);
+            Clipboard.SetContent(videoPackage); Clipboard.Flush();
+            await ConfirmAndCloseAsync("Copied");
+            return;
+        }
         byte[] png = await _capture.ReadPngAsync();
         using var stream = new InMemoryRandomAccessStream();
         using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
@@ -430,6 +484,22 @@ internal sealed class PreviewWindow : Window
 
     private Task SaveAsync() => RunOperationAsync("Save failed", async () =>
     {
+        if (_video is not null)
+        {
+            var videoPicker = new FileSavePicker { SuggestedFileName = $"Recording {DateTime.Now:yyyy-MM-dd HHmmss}" };
+            videoPicker.FileTypeChoices.Add("MP4 video", new List<string> { ".mp4" });
+            WinRT.Interop.InitializeWithWindow.Initialize(videoPicker, _window);
+            CancellationToken token = _interactiveCancellation.Token;
+            var destination = await videoPicker.PickSaveFileAsync().AsTask(token);
+            if (destination is null) return;
+            if (!StringComparer.OrdinalIgnoreCase.Equals(destination.Path, _video.Path))
+            {
+                var source = await StorageFile.GetFileFromPathAsync(_video.Path);
+                await source.CopyAndReplaceAsync(destination);
+            }
+            await ConfirmAndCloseAsync("Saved");
+            return;
+        }
         var picker = new FileSavePicker { SuggestedFileName = $"Screenshot {DateTime.Now:yyyy-MM-dd HHmmss}" };
         picker.FileTypeChoices.Add("PNG image", new List<string> { ".png" });
         WinRT.Interop.InitializeWithWindow.Initialize(picker, _window);
@@ -437,8 +507,11 @@ internal sealed class PreviewWindow : Window
         interactiveToken.ThrowIfCancellationRequested();
         var file = await picker.PickSaveFileAsync().AsTask(interactiveToken);
         if (file is null) return;
-        byte[] png = await _capture.ReadPngAsync();
-        await Windows.Storage.FileIO.WriteBytesAsync(file, png);
+        if (!_owner.IsSavedFile(_capture, file.Path))
+        {
+            byte[] png = await _capture.ReadPngAsync();
+            await Windows.Storage.FileIO.WriteBytesAsync(file, png);
+        }
         await ConfirmAndCloseAsync("Saved");
     });
 
@@ -451,7 +524,7 @@ internal sealed class PreviewWindow : Window
 
     private async Task RunOperationAsync(string failureMessage, Func<Task> operationBody)
     {
-        if (_closed || _capture.IsDeleted) return;
+        if (_closed || _capture.IsDeleted || _video?.IsDeleted == true) return;
         var operation = _operations.TryBegin();
         if (operation is null) return;
         try

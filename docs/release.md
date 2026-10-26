@@ -34,7 +34,7 @@ The package contains the app, not the development launchers, source tree, smoke 
 
 Extract the entire ZIP and run `Ovi.Screenshot.exe`. Keep the adjacent runtime files and resources together. Startup is in the notification area; there is no main dashboard. Click the tray icon or use the default **Ctrl+Shift+4** shortcut to select an area. Escape cancels selection. Settings lets an existing user profile retain or change its configured shortcut.
 
-Hover over a screenshot preview for Copy, Save, Delete and Close. Right-click the tray icon for recording, Settings, and Quit. Space selects a window for screenshots or video. Recording settings offer target FPS and optional system sound/microphone devices; audio defaults off. The annotation editor, durable browsable screenshot history, and macOS app are not part of this preview.
+Choose Screenshot or Video on the selector, then select an area or press Space for a window. Both automatically save to Pictures/Ovi Screenshot and show a floating preview with Copy, Save, Delete and Close. Delete removes that saved capture; independent copies remain. Video settings offer target FPS and optional system sound/microphone devices; audio defaults off. The annotation editor, durable browsable screenshot history, and macOS app are not part of this preview.
 
 The preview is unsigned, and Windows may show an unrecognized-publisher or SmartScreen prompt. Do not describe it as signed or verified by a publisher. A self-contained build includes its runtime files; testing on the developer's machine alone does not prove every clean-machine dependency or display scenario.
 

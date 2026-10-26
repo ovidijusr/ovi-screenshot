@@ -46,8 +46,9 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             await ServiceSmoke.VerifyAsync(Path.ChangeExtension(marker, ".service-cache"));
             await RecordingAudioSmoke.VerifyAsync();
             _settings.VerifySyntheticRecordingSettings();
-            await RecordingSetupWindow.VerifySyntheticAsync(_recordingWorkArea,
-                element => RenderFixtureAsync(element, Path.ChangeExtension(marker, ".recording-setup.png")));
+            await CaptureSetupWindow.VerifySyntheticAsync(_recordingWorkArea,
+                element => RenderFixtureAsync(element, Path.ChangeExtension(marker, ".recording-setup.png")),
+                element => RenderFixtureAsync(element, Path.ChangeExtension(marker, ".screenshot-setup.png")));
             _settings.SetShortcutEditingEnabled(false);
             _settings.StartKeyCapture();
             if (_settings.IsLearningShortcut) throw new InvalidOperationException("Shortcut editing was not blocked during an update.");
@@ -62,7 +63,7 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             await SelectionWindow.RenderCancelAppearanceAsync(Path.ChangeExtension(marker, ".cancel.png"));
             await VerifyWindowCaptureAsync(marker);
             await RenderDocumentationImagesAsync(marker);
-            return "PASS multi-display composition/routing/selection and generated overlay; recording setup options/placement/Record/cancellation, recording settings drafts/explicit Apply/pending rollback/unavailable routes, generated PCM timing/mix/pause/ownership, recording outline/move, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window WGC/PNG alpha and MP4 movement/pause/resize/orientation, preview stack, shared-capture trash/busy protection/adaptive actions, drag payload, tray menu, shortcuts and bitmap geometry. " + details + $" Connected displays: {connectedDisplays.Monitors.Count}." + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture, audio device capture or cross-app launch/drop performed.";
+            return "PASS shared screenshot/video selection and toolbar, automatic-save ownership/collisions/recovery, video thumbnail and shared preview stack, file export/deletion retry, recording settings and generated audio timing, outline/movement, countdown, own-window capture and MP4, shortcuts and bitmap geometry. " + details + $" Connected displays: {connectedDisplays.Monitors.Count}." + " UI and media use generated fixtures. No desktop capture, audio device capture or cross-app launch/drop performed.";
         }
         finally
         {
@@ -109,16 +110,16 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
         for (int index = 3; index < pixels.Length; index += 4) pixels[index] = 255;
         var selector = new SelectionWindow(CapturedDisplay.FromOpaqueBgra(width, height, pixels), bounds, pixels,
             controlsBounds: bounds, areaLimits: [bounds], confirmSelection: true);
-        RecordingSetupWindow? toolbar = null;
+        CaptureSetupWindow? toolbar = null;
         try
         {
             Task<PixelSelection?> selected = selector.SelectAsync();
             var placement = new Win32.Rect { Left = bounds.Left, Right = bounds.Right, Top = bounds.Top, Bottom = bounds.Top };
-            toolbar = new RecordingSetupWindow(placement, _recordingWorkArea, new RecordingOptions(), new AudioDeviceCatalog([], []));
+            toolbar = new CaptureSetupWindow(placement, _recordingWorkArea, new RecordingOptions(), new AudioDeviceCatalog([], []));
             toolbar.AttachOwner(selector.Handle);
             nint toolbarHandle = WinRT.Interop.WindowNative.GetWindowHandle(toolbar);
             selector.SetToolbarHandle(toolbarHandle);
-            selector.SelectionChanged += toolbar.SetCanRecord;
+            selector.SelectionChanged += toolbar.SetCanCapture;
             selector.Activated += toolbar.RaiseWithoutActivation;
             selector.ToolbarRequested += toolbar.ActivateForKeyboard;
             selector.Closing += toolbar.CloseSafely;

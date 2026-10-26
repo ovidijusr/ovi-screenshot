@@ -57,14 +57,17 @@ public sealed partial class ScreenshotApp : Application
             _settings.SetRecordingOptions(loaded.Recording);
             _recordingSettings = new RecordingSettingsController(store, _settings, loaded.Recording, _log.Write);
             _settings.RecordingRequested += _recordingSettings.Apply;
+            var storage = new CaptureStorage();
             _recordings = new RecordingController(_settings.DispatcherQueue, new RecordingLibrary(_paths, _log), _log, Report,
-                new UserDialogs(_settings).ConfirmDiscardRecordingAsync);
-            Task recovery = _recordings.RecoverAsync();
+                new UserDialogs(_settings).ConfirmDiscardRecordingAsync, storage: storage);
             _captures = new CaptureCoordinator(_settings, _previews, _recordings, Report,
-                _recordingSettings.ForRecordingAsync, _recordingSettings.Apply);
+                _recordingSettings.ForRecordingAsync, _recordingSettings.Apply, storage);
             _recordings.CaptureRequested += _captures.RecordArea;
+            _recordings.RecordingSaved = _captures.ShowSavedRecordingAsync;
             _previews.Failed += _log.Write;
             _previews.Deleted += _captures.Forget;
+            _previews.VideoDeleted += _captures.ForgetVideo;
+            Task recovery = _recordings.RecoverAsync();
             nint handle = WinRT.Interop.WindowNative.GetWindowHandle(_settings);
             _desktop = new DesktopIntegration(handle, _captures.Screenshot, ShowSettings, Quit, _captures.ReopenLast, Report, _recordings.Toggle);
             _recordings.StateChanged += recording => _desktop.SetRecording(recording);
