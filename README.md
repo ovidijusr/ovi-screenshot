@@ -14,7 +14,7 @@
 
 - **Select an area or a window.** Drag a region across one or more monitors, or press Space to pick a window. The selection stays undimmed; window captures preserve available transparency and get a soft generated shadow.
 - **Keep each capture within reach.** Previews stack at the screen edge. Hover for Copy, Save, Delete, and Close; double-click to open the full image, or drag its PNG into another app. Delete removes the app's capture immediately; saved/shared copies stay.
-- **Record an area or a window.** Choose 15, 24, 30, or 60 fps and separate system sound and microphone options on the toolbar before pressing Record. A cancellable countdown, visible boundary, and compact controls follow. Audio starts off; paused time is excluded from the MP4.
+- **Record an area or a window.** The toolbar appears while you select; drag a selected area to move it, choose FPS and audio options, then press Record. A cancellable countdown, visible boundary, and compact controls follow. Audio starts off; paused time is excluded from the MP4.
 - **Use native Windows controls.** Start from the tray or your chosen shortcut. Menus and settings follow the Windows theme, and preview actions support keyboard focus.
 
 A short, soft sound confirms successful screenshots. Canceling a capture stays silent.

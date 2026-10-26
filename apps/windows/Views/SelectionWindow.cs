@@ -24,6 +24,7 @@ internal sealed class SelectionWindow
     private readonly CapturedDisplay _capture;
     private readonly Win32.Rect _bounds;
     private readonly IReadOnlyList<Win32.Rect>? _areaLimits;
+    private readonly bool _confirmSelection;
     private Win32.Rect? _activeAreaLimit;
     private readonly IReadOnlyList<WindowCaptureTarget> _windows;
     private readonly NativeCaptureBitmap _source, _buffer;
@@ -31,6 +32,7 @@ internal sealed class SelectionWindow
     private readonly nint _blackPen, _whitePen;
     private readonly Stopwatch _prepareTimer = Stopwatch.StartNew();
     private nint _window, _cancel;
+    private nint _toolbarHandle;
     private nint _cancelFont, _hintFont;
     private Win32.Rect _cancelBounds;
     private Win32.Rect _modeHintBounds;
@@ -38,22 +40,32 @@ internal sealed class SelectionWindow
     private bool _cancelHovered;
     private WindowHook? _buttonHook;
     private int _anchorX, _anchorY, _currentX, _currentY;
-    private bool _anchored, _dragging, _complete, _shown, _disposed;
+    private bool _anchored, _dragging, _complete, _shown, _disposed, _selectionReady, _moving;
+    private PixelSelection _moveStart;
+    private int _moveOriginX, _moveOriginY;
     private bool _windowMode;
     private bool _windowClickPending;
+    private bool _closingNotified;
+    private bool _hadForeground;
     private WindowCaptureTarget? _pressedWindow;
     private int _windowIndex = -1;
     private int Width => _bounds.Width;
     private int Height => _bounds.Height;
     internal bool IsVisible => _window != 0 && Native.IsWindowVisible(_window);
+    internal nint Handle => _window;
+    internal bool HasSelection => _selectionReady && !_dragging && !_windowClickPending && !_complete;
+    internal event Action<bool>? SelectionChanged;
+    internal event Action? Activated;
+    internal event Action? ToolbarRequested;
+    internal event Action? Closing;
     internal WindowCaptureTarget? SelectedWindow { get; private set; }
 
     internal SelectionWindow(CapturedDisplay capture, Win32.Rect bounds, byte[]? preparedBgra = null,
         IReadOnlyList<WindowCaptureTarget>? windows = null, Win32.Rect? controlsBounds = null,
-        IReadOnlyList<Win32.Rect>? areaLimits = null)
+        IReadOnlyList<Win32.Rect>? areaLimits = null, bool confirmSelection = false)
     {
         if (bounds.Width <= 0 || bounds.Height <= 0) throw new ArgumentOutOfRangeException(nameof(bounds));
-        _capture = capture; _bounds = bounds;
+        _capture = capture; _bounds = bounds; _confirmSelection = confirmSelection;
         Win32.Rect controls = ClipWindow(controlsBounds ?? bounds, bounds);
         if (controls.Width <= 0 || controls.Height <= 0) throw new ArgumentException("Selection controls must be inside the captured desktop.", nameof(controlsBounds));
         _areaLimits = areaLimits?.Select(limit => ClipWindow(limit, bounds)).Where(limit => limit.Width > 0 && limit.Height > 0).ToArray();
@@ -69,7 +81,9 @@ internal sealed class SelectionWindow
             if (_blackPen == 0 || _whitePen == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
             RegisterClass();
             _window = Native.CreateWindowEx(0x00000008 | 0x00000080 | 0x00010000, ClassName,
-                "Select capture area. Drag or use arrows and Enter. Space selects a window. Escape cancels.", 0x80000000 | 0x02000000,
+                confirmSelection
+                    ? "Select recording area. Drag or use arrows and Enter. Space selects a window. Tab opens recording controls. Escape cancels."
+                    : "Select capture area. Drag or use arrows and Enter. Space selects a window. Escape cancels.", 0x80000000 | 0x02000000,
                 controls.Left, controls.Top, controls.Width, controls.Height, 0, 0, Native.GetModuleHandle(null), 0);
             if (_window == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
             uint dpi = Win32.GetDpiForWindow(_window);
@@ -107,7 +121,11 @@ internal sealed class SelectionWindow
                 }
                 if (message != WindowMessage.KeyDown) return null;
                 if ((uint)key is 0x1B or 0x0D) { Finish(null); return 0; }
-                if ((uint)key == 0x09) { Native.SetFocus(_window); return 0; }
+                if ((uint)key == 0x09 || (_confirmSelection && (uint)key == 0x75))
+                {
+                    if (_confirmSelection) ToolbarRequested?.Invoke(); else Native.SetFocus(_window);
+                    return 0;
+                }
                 return null;
             }, Fail);
             // Paint the complete backing surface before its HWND becomes visible.
@@ -123,7 +141,7 @@ internal sealed class SelectionWindow
         _shown = true;
         var timer = Stopwatch.StartNew();
         Native.ShowWindow(_window, 5);
-        Native.SetForegroundWindow(_window);
+        if (Native.SetForegroundWindow(_window)) _hadForeground = true;
         Native.SetFocus(_window);
         Native.InvalidateRect(_window, 0, false);
         Native.UpdateWindow(_window);
@@ -133,6 +151,30 @@ internal sealed class SelectionWindow
     }
 
     internal void Cancel() => Finish(null);
+
+    internal void SetToolbarHandle(nint toolbar)
+    {
+        if (!_confirmSelection || _complete || toolbar == 0) throw new InvalidOperationException("The recording toolbar is unavailable.");
+        _toolbarHandle = toolbar;
+    }
+
+    internal void FocusSelection()
+    {
+        if (!_confirmSelection || _complete || !_shown || _window == 0) return;
+        if (Native.SetForegroundWindow(_window)) _hadForeground = true;
+        Native.SetFocus(_window);
+    }
+
+    internal void ConfirmSelection()
+    {
+        if (!_confirmSelection || !_selectionReady || _dragging || _windowClickPending || _complete) return;
+        if (_windowMode)
+        {
+            if (ResolveWindowConfirmation(SelectedWindow, _bounds, _capture.Width, _capture.Height) is { } confirmation)
+                Finish(confirmation.Selection);
+        }
+        else if (CurrentSelection() is { Width: > 0, Height: > 0 } area) Finish(area);
+    }
 
     private static void RegisterClass()
     {
@@ -181,10 +223,22 @@ internal sealed class SelectionWindow
                     ChangeVisuals(() => SetCurrent(point.X, point.Y));
                     _pressedWindow = CurrentWindow();
                     _windowClickPending = true;
+                    NotifySelectionChanged();
+                    Native.SetFocus(_window); Native.SetCapture(_window); return 0;
+                }
+                var sourcePoint = ToSourcePoint(point.X, point.Y);
+                if (_confirmSelection && _selectionReady && Contains(CurrentSelection(), sourcePoint.X, sourcePoint.Y))
+                {
+                    _moving = _dragging = true;
+                    NotifySelectionChanged();
+                    _moveStart = CurrentSelection();
+                    (_moveOriginX, _moveOriginY) = sourcePoint;
                     Native.SetFocus(_window); Native.SetCapture(_window); return 0;
                 }
                 ChangeVisuals(() =>
                 {
+                    SetSelectionReady(false);
+                    SelectedWindow = null;
                     ResetAreaAnchor();
                     SetCurrent(point.X, point.Y);
                     _dragging = TryAnchorCurrent();
@@ -207,12 +261,20 @@ internal sealed class SelectionWindow
                     bool confirm = ShouldConfirmWindowRelease(_pressedWindow, CurrentWindow());
                     ClearPointerCapture();
                     if (confirm) ConfirmWindow();
+                    NotifySelectionChanged();
                     return 0;
                 }
                 if (!_dragging) return 0;
-                ChangeVisuals(() => SetCurrent(point.X, point.Y));
+                bool wasMoving = _moving;
+                if (_moving) ChangeVisuals(() => MoveSelectedArea(point.X, point.Y));
+                else ChangeVisuals(() => SetCurrent(point.X, point.Y));
                 ClearPointerCapture();
-                if (CurrentSelection() is { Width: > 0, Height: > 0 } area) Finish(area);
+                if (CurrentSelection() is { Width: > 0, Height: > 0 } area)
+                {
+                    if (_confirmSelection) { ChangeVisuals(() => SetSelectionReady(true)); Announce(); }
+                    else Finish(area);
+                    if (_confirmSelection && wasMoving) NotifySelectionChanged();
+                }
                 else ChangeVisuals(ResetAreaAnchor);
                 return 0;
             }
@@ -220,15 +282,29 @@ internal sealed class SelectionWindow
                 if ((uint)wParam == 0x20 && ((long)lParam & (1L << 30)) != 0) return 0;
                 HandleKey((uint)wParam); return 0;
             case WindowMessage.Command: if ((int)(wParam & 0xFFFF) == CancelId) { Finish(null); return 0; } break;
-            case WindowMessage.Close: case WindowMessage.CancelMode: Finish(null); return 0;
+            case WindowMessage.Close: Finish(null); return 0;
+            case WindowMessage.CancelMode:
+                if (!_confirmSelection || _dragging || _windowClickPending) Finish(null);
+                return 0;
             case WindowMessage.DisplayChanged: case WindowMessage.DpiChanged:
                 if (_shown) Finish(null);
                 return 0;
             case WindowMessage.CaptureChanged: if (_dragging || _windowClickPending) Finish(null); return 0;
-            case WindowMessage.Activate: if (_shown && ((uint)wParam & 0xFFFF) == 0) Finish(null); break;
+            case WindowMessage.Activate:
+                if (!_shown) break;
+                if (((uint)wParam & 0xFFFF) != 0)
+                {
+                    if (_confirmSelection) { ObserveForeground(); Activated?.Invoke(); }
+                }
+                else if (!_confirmSelection || (lParam != 0 && !IsOwnedForeground(lParam)))
+                    Finish(null);
+                else if (lParam == 0 || !IsOwnedForeground(lParam)) CheckForegroundLater();
+                break;
             case WindowMessage.PowerBroadcast: if ((uint)wParam is 4 or 7) Finish(null); break;
             case WindowMessage.NonClientDestroyed:
                 nint destroyed = _window;
+                _complete = true;
+                NotifyClosing();
                 ClearPointerCapture();
                 Windows.Remove(destroyed); _window = 0;
                 DisposeResources(); _completion.TrySetResult(null);
@@ -240,7 +316,11 @@ internal sealed class SelectionWindow
     private void HandleKey(uint key)
     {
         if (key == 0x1B) { Finish(null); return; }
-        if (key == 0x09) { Native.SetFocus(_cancel); return; }
+        if (key == 0x09 || (_confirmSelection && key == 0x75))
+        {
+            if (_confirmSelection) ToolbarRequested?.Invoke(); else Native.SetFocus(_cancel);
+            return;
+        }
         if (key == 0x20 && _windows.Count > 0) { ToggleWindowMode(); return; }
         if (_windowMode)
         {
@@ -248,18 +328,35 @@ internal sealed class SelectionWindow
             if (key is >= 0x25 and <= 0x28)
             {
                 int direction = key is 0x25 or 0x26 ? -1 : 1;
-                ChangeVisuals(() => _windowIndex = NextWindowIndex(_windowIndex, _windows.Count, direction));
+                ChangeVisuals(() =>
+                {
+                    SetSelectionReady(false); SelectedWindow = null;
+                    _windowIndex = NextWindowIndex(_windowIndex, _windows.Count, direction);
+                });
                 Announce();
             }
             return;
         }
         if (key == 0x0D)
         {
+            if (_confirmSelection && _selectionReady) return;
             if (!_anchored) ChangeVisuals(() => TryAnchorCurrent());
-            else if (CurrentSelection() is { Width: > 0, Height: > 0 } area) Finish(area);
+            else if (CurrentSelection() is { Width: > 0, Height: > 0 } area)
+            {
+                if (_confirmSelection) ChangeVisuals(() => SetSelectionReady(true));
+                else Finish(area);
+            }
             Announce(); return;
         }
         int step = (Native.GetKeyState(0x10) & 0x8000) != 0 ? 10 : 1;
+        if (_confirmSelection && _selectionReady && key is >= 0x25 and <= 0x28)
+        {
+            int dx = key == 0x25 ? -step : key == 0x27 ? step : 0;
+            int dy = key == 0x26 ? -step : key == 0x28 ? step : 0;
+            ChangeVisuals(() => ApplyMovedArea(ClampMovedArea(CurrentSelection(), dx, dy,
+                _activeAreaLimit ?? new Win32.Rect { Right = _capture.Width, Bottom = _capture.Height })));
+            Announce(); return;
+        }
         ChangeVisuals(() =>
         {
             switch (key)
@@ -278,15 +375,17 @@ internal sealed class SelectionWindow
         if (_window == 0) return;
         if (_windowMode)
         {
-            string title = CurrentWindow()?.Title ?? "Point at a window";
-            Native.SetWindowText(_window, $"Window capture. {title}. Enter captures. Arrows choose a window. Space returns to area. Escape cancels.");
+            string title = (_selectionReady ? SelectedWindow : CurrentWindow())?.Title ?? "Point at a window";
+            Native.SetWindowText(_window, _confirmSelection
+                ? $"Window recording. {title}. {(_selectionReady ? "Use Record to start." : "Enter selects. Arrows choose a window.")} Space returns to area. Escape cancels."
+                : $"Window capture. {title}. Enter captures. Arrows choose a window. Space returns to area. Escape cancels.");
             Native.NotifyWinEvent(0x800C, _window, 0, 0);
             return;
         }
         var selection = CurrentSelection();
         bool inGap = !_anchored && !TryLatchAreaLimit(_areaLimits, _bounds, _capture.Width, _capture.Height, _currentX, _currentY, out _);
         Native.SetWindowText(_window, inGap ? "Move the selection cursor onto a display. Enter sets a corner. Escape cancels."
-            : _anchored ? $"Selected area {selection.Width} by {selection.Height} pixels. Enter captures. Escape cancels."
+            : _anchored ? $"Selected area {selection.Width} by {selection.Height} pixels. {(_confirmSelection ? _selectionReady ? "Use Record to start." : "Move and press Enter to select." : "Enter captures.")} Escape cancels."
             : $"Selection cursor {_currentX}, {_currentY}. Enter sets a corner. Escape cancels.");
         Native.NotifyWinEvent(0x800C, _window, 0, 0);
     }
@@ -320,6 +419,68 @@ internal sealed class SelectionWindow
         _activeAreaLimit = null;
     }
 
+    private void SetSelectionReady(bool ready)
+    {
+        if (_selectionReady == ready) return;
+        _selectionReady = ready;
+        NotifySelectionChanged();
+    }
+
+    private void NotifySelectionChanged() => SelectionChanged?.Invoke(HasSelection);
+
+    private (int X, int Y) ToSourcePoint(int x, int y) =>
+        (Math.Clamp((int)Math.Round(x * (double)_capture.Width / Width), 0, _capture.Width),
+         Math.Clamp((int)Math.Round(y * (double)_capture.Height / Height), 0, _capture.Height));
+
+    private static bool Contains(PixelSelection area, int x, int y) =>
+        x >= area.X && x < (long)area.X + area.Width && y >= area.Y && y < (long)area.Y + area.Height;
+
+    private void MoveSelectedArea(int x, int y)
+    {
+        var point = ToSourcePoint(x, y);
+        ApplyMovedArea(ClampMovedArea(_moveStart, point.X - _moveOriginX, point.Y - _moveOriginY,
+            _activeAreaLimit ?? new Win32.Rect { Right = _capture.Width, Bottom = _capture.Height }));
+    }
+
+    private void ApplyMovedArea(PixelSelection area)
+    {
+        _anchorX = area.X; _anchorY = area.Y;
+        _currentX = area.X + area.Width; _currentY = area.Y + area.Height;
+    }
+
+    private static PixelSelection ClampMovedArea(PixelSelection area, int dx, int dy, Win32.Rect limit)
+    {
+        int x = (int)Math.Clamp((long)area.X + dx, limit.Left, (long)limit.Right - area.Width);
+        int y = (int)Math.Clamp((long)area.Y + dy, limit.Top, (long)limit.Bottom - area.Height);
+        return area with { X = x, Y = y };
+    }
+
+    private bool IsOwnedForeground(nint candidate)
+    {
+        if (candidate == _window || candidate == _toolbarHandle) return true;
+        nint root = Native.GetAncestor(candidate, 3);
+        return root == _window || (_toolbarHandle != 0 && root == _toolbarHandle);
+    }
+
+    private void CheckForegroundLater()
+    {
+        var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        dispatcher?.TryEnqueue(() =>
+        {
+            if (_complete || _window == 0) return;
+            nint foreground = Win32.GetForegroundWindow();
+            if (foreground != 0 && IsOwnedForeground(foreground)) _hadForeground = true;
+            else if (_hadForeground && foreground != 0)
+                Finish(null);
+        });
+    }
+
+    private void ObserveForeground()
+    {
+        nint foreground = Win32.GetForegroundWindow();
+        if (foreground != 0 && IsOwnedForeground(foreground)) _hadForeground = true;
+    }
+
     private (int X, int Y) ReadPointer(nint messagePoint, bool latest = false)
     {
         // A button's queued position defines the exact corner, even if the cursor
@@ -333,6 +494,8 @@ internal sealed class SelectionWindow
 
     private void MovePointer(int x, int y)
     {
+        if (_moving) { ChangeVisuals(() => MoveSelectedArea(x, y)); return; }
+        if (_confirmSelection && _selectionReady && !_windowMode && !_dragging) return;
         if (_windowMode && HitTestWindow(_windows, _bounds.Left + x, _bounds.Top + y) == _windowIndex)
         {
             SetCurrent(x, y); // No changed mark and no full-window repaint while moving within one target.
@@ -344,11 +507,15 @@ internal sealed class SelectionWindow
     private void ToggleWindowMode()
     {
         ClearPointerCapture();
+        bool hadSelection = _selectionReady;
         ChangeVisuals(() =>
         {
+            SetSelectionReady(false); SelectedWindow = null;
             _windowMode = !_windowMode;
             ResetAreaAnchor();
-            _windowIndex = _windowMode ? HitTestWindow(_windows, _bounds.Left + Math.Min(X(_currentX), Width - 1), _bounds.Top + Math.Min(Y(_currentY), Height - 1)) : -1;
+            if (_windowMode && hadSelection && Win32.GetCursorPos(out var pointer))
+                SetCurrent(pointer.X - _bounds.Left, pointer.Y - _bounds.Top);
+            else _windowIndex = _windowMode ? HitTestWindow(_windows, _bounds.Left + Math.Min(X(_currentX), Width - 1), _bounds.Top + Math.Min(Y(_currentY), Height - 1)) : -1;
         });
         InvalidateModeHint();
         Announce();
@@ -358,7 +525,7 @@ internal sealed class SelectionWindow
 
     private void ClearPointerCapture()
     {
-        _dragging = _windowClickPending = false;
+        _dragging = _windowClickPending = _moving = false;
         _pressedWindow = null;
         if (_window != 0 && Native.GetCapture() == _window) Native.ReleaseCapture();
     }
@@ -369,15 +536,19 @@ internal sealed class SelectionWindow
     private void ConfirmWindow()
     {
         if (ResolveWindowConfirmation(CurrentWindow(), _bounds, _capture.Width, _capture.Height) is not { } confirmation) return;
-        SelectedWindow = confirmation.Target;
-        Finish(confirmation.Selection);
+        if (_confirmSelection)
+        {
+            ChangeVisuals(() => { SelectedWindow = confirmation.Target; SetSelectionReady(true); });
+            Announce();
+        }
+        else { SelectedWindow = confirmation.Target; Finish(confirmation.Selection); }
     }
 
     private Win32.Rect? MarkBounds()
     {
         if (_windowMode)
         {
-            if (CurrentWindow() is not { } target) return null;
+            if ((_selectionReady ? SelectedWindow : CurrentWindow()) is not { } target) return null;
             Win32.Rect clipped = ClipWindow(target.Bounds, _bounds);
             return new Win32.Rect { Left = clipped.Left - _bounds.Left, Top = clipped.Top - _bounds.Top, Right = clipped.Right - _bounds.Left, Bottom = clipped.Bottom - _bounds.Top };
         }
@@ -545,6 +716,17 @@ internal sealed class SelectionWindow
         var large = new Win32.Rect { Left = -25000, Top = -5000, Right = 25000, Bottom = 5000 };
         Require(ScreenToViewport(large, new Win32.Point { X = 15000, Y = -1234 }) == (40000, 3766),
             "screen pointer coordinates do not wrap through a signed 16-bit client position");
+        var movable = new PixelSelection(100, 700, 400, 300);
+        var moveLimit = new Win32.Rect { Left = 0, Top = 600, Right = 1920, Bottom = 1680 };
+        Require(ClampMovedArea(movable, 500, -50, moveLimit) == new PixelSelection(600, 650, 400, 300),
+            "moving preserves area dimensions and pointer offset");
+        Require(ClampMovedArea(movable, -2000, 3000, moveLimit) == new PixelSelection(0, 1380, 400, 300),
+            "moving clamps the entire selection to its originating display");
+        Require(ClampMovedArea(movable, 3000, -3000, moveLimit) == new PixelSelection(1520, 600, 400, 300),
+            "moving clamps against the opposite monitor edges");
+        Require(Contains(movable, 100, 700) && Contains(movable, 499, 999) && !Contains(movable, 500, 999),
+            "only points inside the selected area start a move");
+        VerifySyntheticMoveLifecycle();
 
         bool InsideWork(Win32.Rect viewport, Win32.Rect work) => viewport.Left + desktop.Left >= work.Left &&
             viewport.Right + desktop.Left <= work.Right && viewport.Top + desktop.Top >= work.Top && viewport.Bottom + desktop.Top <= work.Bottom;
@@ -552,6 +734,65 @@ internal sealed class SelectionWindow
         {
             if (!condition) throw new InvalidOperationException("Multi-display selection regression: " + scenario + ".");
         }
+    }
+
+    private static void VerifySyntheticMoveLifecycle()
+    {
+        const int width = 320, height = 200;
+        byte[] pixels = new byte[width * height * 4];
+        for (int offset = 3; offset < pixels.Length; offset += 4) pixels[offset] = 255;
+        var display = CapturedDisplay.FromOpaqueBgra(width, height, pixels);
+        var bounds = new Win32.Rect { Left = -320, Top = -200, Right = 0, Bottom = 0 };
+        var window = new SelectionWindow(display, bounds, pixels, areaLimits: [bounds], confirmSelection: true);
+        var changes = new List<bool>();
+        int focusRequests = 0, closes = 0;
+        bool aliveWhenClosing = false;
+        window.SelectionChanged += changes.Add;
+        window.ToolbarRequested += () => focusRequests++;
+        window.Closing += () => { closes++; aliveWhenClosing = window.Handle != 0; };
+        try
+        {
+            window.HandleKey(0x09); window.HandleKey(0x75);
+            if (focusRequests != 2) throw new InvalidOperationException("Keyboard navigation could not reach the recording toolbar.");
+            window.SetCurrent(20, 30);
+            if (!window.TryAnchorCurrent()) throw new InvalidOperationException("Could not anchor generated recording selection.");
+            window.SetCurrent(120, 90);
+            window.SetSelectionReady(true);
+            if (!window.HasSelection || changes.Count != 1 || !changes[0])
+                throw new InvalidOperationException("Recording selection did not become ready.");
+            window._moveStart = window.CurrentSelection();
+            window._moveOriginX = 30; window._moveOriginY = 40;
+            window._moving = window._dragging = true;
+            window.NotifySelectionChanged();
+            window.MoveSelectedArea(310, 190);
+            window.ConfirmSelection();
+            if (window.HasSelection || window._complete || changes[^1])
+                throw new InvalidOperationException("A moving selection could be confirmed or left Record enabled.");
+            window.ClearPointerCapture();
+            window.NotifySelectionChanged();
+            if (!window.HasSelection || !changes[^1] || window.CurrentSelection() != new PixelSelection(220, 140, 100, 60))
+                throw new InvalidOperationException("Moving selection did not retain its dimensions and clamp to the display.");
+            window.ConfirmSelection();
+            if (!window._completion.Task.IsCompletedSuccessfully || window.CurrentSelection() != new PixelSelection(220, 140, 100, 60)
+                || closes != 1 || !aliveWhenClosing)
+                throw new InvalidOperationException("Record did not confirm the moved selection.");
+        }
+        finally { window.Cancel(); }
+
+        var target = new WindowCaptureTarget(new nint(1), new Win32.Rect { Left = -300, Top = -160, Right = -120, Bottom = -60 }, "Generated window");
+        var picker = new SelectionWindow(display, bounds, pixels, windows: [target], areaLimits: [bounds], confirmSelection: true);
+        try
+        {
+            picker._windowMode = true; picker._windowIndex = 0;
+            picker.ConfirmWindow();
+            picker._windowIndex = -1; // Moving the pointer to the toolbar must not lose the chosen HWND.
+            if (!picker.HasSelection || picker._complete || !ReferenceEquals(picker.SelectedWindow, target))
+                throw new InvalidOperationException("Window selection was not retained for Record.");
+            picker.ConfirmSelection();
+            if (!picker._completion.Task.IsCompletedSuccessfully || !ReferenceEquals(picker.SelectedWindow, target))
+                throw new InvalidOperationException("Record did not confirm the selected window.");
+        }
+        finally { picker.Cancel(); }
     }
     private PixelSelection CurrentSelection() => new(Math.Min(_anchorX, _currentX), Math.Min(_anchorY, _currentY), Math.Abs(_anchorX - _currentX), Math.Abs(_anchorY - _currentY));
     private int X(int source) => (int)Math.Round(source * (double)Width / _capture.Width);
@@ -567,7 +808,7 @@ internal sealed class SelectionWindow
     private void InvalidateMarks()
     {
         if (_window == 0) return;
-        if (!_windowMode)
+        if (!_windowMode && !_selectionReady)
         {
             int x = X(_currentX), y = Y(_currentY);
             Invalidate(x - 10, y - 10, x + 11, y + 11);
@@ -621,7 +862,7 @@ internal sealed class SelectionWindow
                 {
                     Native.Rectangle(_buffer.Dc, mark.Left, mark.Top, mark.Right, mark.Bottom);
                 }
-                if (!_windowMode)
+                if (!_windowMode && !_selectionReady)
                 {
                     int x = Math.Clamp(X(_currentX), 0, Width - 1), y = Math.Clamp(Y(_currentY), 0, Height - 1);
                     Native.MoveToEx(_buffer.Dc, x - 7, y, 0); Native.LineTo(_buffer.Dc, x + 8, y);
@@ -800,11 +1041,24 @@ internal sealed class SelectionWindow
     {
         if (_complete) return;
         _complete = true;
+        NotifyClosing();
         ClearPointerCapture();
         _completion.TrySetResult(selection);
         _buttonHook?.Dispose(); _buttonHook = null;
         if (_window != 0) Native.DestroyWindow(_window);
         DisposeResources();
+    }
+
+    private void NotifyClosing()
+    {
+        if (_closingNotified) return;
+        _closingNotified = true;
+        try { Closing?.Invoke(); }
+        catch (Exception error)
+        {
+            try { Ovi.Screenshot.Services.AppLog.Shared.Write(error); }
+            catch { Trace.WriteLine(error); }
+        }
     }
     private void Fail(Exception error)
     {
@@ -861,6 +1115,7 @@ internal sealed class SelectionWindow
         [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(nint window);
         [DllImport("user32.dll")] internal static extern nint SetFocus(nint window);
         [DllImport("user32.dll")] internal static extern nint SetCapture(nint window);
+        [DllImport("user32.dll")] internal static extern nint GetAncestor(nint window, uint flags);
         [DllImport("user32.dll")] internal static extern nint GetCapture();
         [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
         [DllImport("user32.dll")] internal static extern short GetKeyState(int key);

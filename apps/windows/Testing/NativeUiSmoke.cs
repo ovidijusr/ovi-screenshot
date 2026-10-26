@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -41,6 +42,7 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             if (!connected.IsCurrent() || (connected with { Bounds = shiftedBounds }).IsCurrent())
                 throw new InvalidOperationException("Recording monitor validation ignored a same-size change of origin.");
             await VerifyMultiDisplayOverlayAsync();
+            await VerifyRecordingSelectionWindowsAsync();
             await ServiceSmoke.VerifyAsync(Path.ChangeExtension(marker, ".service-cache"));
             await RecordingAudioSmoke.VerifyAsync();
             _settings.VerifySyntheticRecordingSettings();
@@ -97,20 +99,61 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
         finally { overlay.Cancel(); }
     }
 
+    private async Task VerifyRecordingSelectionWindowsAsync()
+    {
+        int width = Math.Min(640, _recordingWorkArea.Width - 48);
+        int height = Math.Min(260, _recordingWorkArea.Height - 48);
+        var bounds = new Win32.Rect { Left = _recordingWorkArea.Left + 24, Top = _recordingWorkArea.Top + 24,
+            Right = _recordingWorkArea.Left + 24 + width, Bottom = _recordingWorkArea.Top + 24 + height };
+        byte[] pixels = new byte[width * height * 4];
+        for (int index = 3; index < pixels.Length; index += 4) pixels[index] = 255;
+        var selector = new SelectionWindow(CapturedDisplay.FromOpaqueBgra(width, height, pixels), bounds, pixels,
+            controlsBounds: bounds, areaLimits: [bounds], confirmSelection: true);
+        RecordingSetupWindow? toolbar = null;
+        try
+        {
+            Task<PixelSelection?> selected = selector.SelectAsync();
+            var placement = new Win32.Rect { Left = bounds.Left, Right = bounds.Right, Top = bounds.Top, Bottom = bounds.Top };
+            toolbar = new RecordingSetupWindow(placement, _recordingWorkArea, new RecordingOptions(), new AudioDeviceCatalog([], []));
+            toolbar.AttachOwner(selector.Handle);
+            nint toolbarHandle = WinRT.Interop.WindowNative.GetWindowHandle(toolbar);
+            selector.SetToolbarHandle(toolbarHandle);
+            selector.SelectionChanged += toolbar.SetCanRecord;
+            selector.Activated += toolbar.RaiseWithoutActivation;
+            selector.ToolbarRequested += toolbar.ActivateForKeyboard;
+            selector.Closing += toolbar.CloseSafely;
+            toolbar.FocusSelectionRequested += selector.FocusSelection;
+            toolbar.CancelRequested += () => { toolbar.CloseSafely(); selector.Cancel(); };
+            toolbar.ShowForSelection();
+            await Task.Delay(100);
+            toolbar.ActivateForKeyboard();
+            await Task.Delay(100);
+            if (selected.IsCompleted || !selector.IsVisible || toolbar.IsClosed)
+                throw new InvalidOperationException("Focusing the recording toolbar closed the selector.");
+            Win32.SetForegroundWindow(selector.Handle);
+            await Task.Delay(100);
+            if (selected.IsCompleted || !selector.IsVisible || toolbar.IsClosed)
+                throw new InvalidOperationException("Returning focus to the selector lost the recording toolbar.");
+            var position = toolbar.AppWindow.Position;
+            var size = toolbar.AppWindow.Size;
+            nint hit = WindowFromPoint(new Win32.Point { X = position.X + size.Width / 2, Y = position.Y + size.Height / 2 });
+            if (hit != toolbarHandle && GetAncestor(hit, 2) != toolbarHandle)
+                throw new InvalidOperationException("The recording toolbar fell behind the selection canvas.");
+            toolbar.CloseSafely();
+            selector.Cancel();
+            if (await selected.WaitAsync(TimeSpan.FromSeconds(3)) is not null || selector.IsVisible)
+                throw new InvalidOperationException("Canceling the recording selector did not close it.");
+        }
+        finally { toolbar?.CloseSafely(); selector.Cancel(); }
+    }
+
+    [DllImport("user32.dll")] private static extern nint WindowFromPoint(Win32.Point point);
+    [DllImport("user32.dll")] private static extern nint GetAncestor(nint window, uint flags);
+
     private async Task VerifyRecordingUiAsync(string? marker)
     {
         RecordingBoundaryWindow.VerifySyntheticLayout();
         var area = _recordingWorkArea;
-        using (var selectionBoundary = new RecordingBoundaryWindow(new Win32.Rect
-        {
-            Left = area.Left + 40, Top = area.Top + 40,
-            Right = Math.Min(area.Right - 40, area.Left + 360), Bottom = Math.Min(area.Bottom - 40, area.Top + 240)
-        }, area, selecting: true))
-        {
-            selectionBoundary.Show();
-            if (!selectionBoundary.IsVisible || selectionBoundary.VisibleStripCount != 4)
-                throw new InvalidOperationException("The recording setup selection outline was not shown.");
-        }
         using (var boundary = new RecordingBoundaryWindow(new Win32.Rect
         {
             Left = area.Left + 40, Top = area.Top + 40,

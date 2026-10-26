@@ -22,15 +22,13 @@ internal sealed class RecordingBoundaryWindow : IDisposable
     private readonly List<Strip> _strips = new(4);
     private nint _brush;
     private bool _registered, _paused, _disposed;
-    private readonly bool _selecting;
     private Exception? _paintFailure;
 
     internal bool IsVisible => !_disposed && _strips.Any(strip => strip.Window != 0 && Native.IsWindowVisible(strip.Window));
     internal int VisibleStripCount => _strips.Count(strip => strip.Window != 0 && Native.IsWindowVisible(strip.Window));
 
-    internal RecordingBoundaryWindow(Win32.Rect screenRegion, Win32.Rect monitorBounds, bool selecting = false)
+    internal RecordingBoundaryWindow(Win32.Rect screenRegion, Win32.Rect monitorBounds)
     {
-        _selecting = selecting;
         // Validate/clamp with the same pure geometry used by the native strips.
         _ = Layout(screenRegion, monitorBounds, 2);
         _region = Intersect(screenRegion, monitorBounds);
@@ -175,8 +173,7 @@ internal sealed class RecordingBoundaryWindow : IDisposable
         {
             try
             {
-                string key = _selecting ? "AccentFillColorDefaultBrush"
-                    : _paused ? "SystemFillColorCautionBrush" : "SystemFillColorCriticalBrush";
+                string key = _paused ? "SystemFillColorCautionBrush" : "SystemFillColorCriticalBrush";
                 if (Application.Current.Resources.TryGetValue(key, out object resource) && resource is SolidColorBrush brush)
                 {
                     var value = brush.Color;
