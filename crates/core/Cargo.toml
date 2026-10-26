@@ -1,0 +1,9 @@
+[package]
+name = "ovi-image-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+png.workspace = true

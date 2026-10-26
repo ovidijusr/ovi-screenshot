@@ -1,0 +1,84 @@
+name: Windows
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_recording_smoke:
+        description: Run synthetic H.264 encode/decode checks (requires hosted Media Foundation codec support)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Build and core checks (Windows x64)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the .NET SDK selected by global.json
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Bootstrap workspace-local Rust
+        run: ./scripts/bootstrap.ps1
+
+      - name: Check Rust formatting, tests and lints
+        run: |
+          . ./scripts/common.ps1
+          Initialize-OviBuildEnvironment -RepositoryRoot $env:GITHUB_WORKSPACE
+          Invoke-OviChecked 'cargo' @('fmt', '--all', '--', '--check')
+          Invoke-OviChecked 'cargo' @('test', '--workspace', '--locked')
+          Invoke-OviChecked 'cargo' @('clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings')
+
+      - name: Build Windows app and smoke programs
+        run: ./scripts/build.ps1 -Configuration Debug -SkipTests
+
+      - name: Verify the native Rust bridge with synthetic pixels
+        run: |
+          $taskCoreSmoke = Join-Path $env:GITHUB_WORKSPACE 'artifacts/windows/Debug/smoke/Ovi.CoreSmoke.exe'
+          $taskCoreImage = Join-Path $env:GITHUB_WORKSPACE 'artifacts/windows/Debug/core-smoke.png'
+          & $taskCoreSmoke $taskCoreImage
+          if ($LASTEXITCODE -ne 0) { throw "Core smoke failed with exit code $LASTEXITCODE." }
+
+      - name: Verify synthetic recording and decoded frames (opt-in)
+        if: github.event_name == 'workflow_dispatch' && inputs.run_recording_smoke
+        run: |
+          $taskRecordingSmoke = Join-Path $env:GITHUB_WORKSPACE 'artifacts/windows/Debug/recording-smoke/Ovi.RecordingSmoke.exe'
+          $taskRecordingFile = Join-Path $env:GITHUB_WORKSPACE ('artifacts/windows/Debug/recording-smoke-' + [Guid]::NewGuid().ToString('N') + '.mp4')
+          & $taskRecordingSmoke $taskRecordingFile
+          if ($LASTEXITCODE -ne 0) { throw "Recording smoke failed with exit code $LASTEXITCODE." }
+
+      - name: Describe validation scope
+        if: always()
+        run: |
+          @'
+          ### Validation scope
+          Required checks build the Windows x64 app and smoke programs, run Rust formatting/tests/Clippy, and exercise the native Rust bridge with generated pixels.
+
+          Synthetic H.264 encoding/decoding runs only when explicitly selected through **Run workflow**. A codec failure fails that run; it is not converted into a passing skip.
+
+          This workflow does not launch the native UI, read the desktop, inject input, or test another app. Capture, focus, mixed-DPI displays, clipboard, drag-and-drop, physical shortcuts and recording controls still require interactive Windows 11 checks.
+          '@ >> $env:GITHUB_STEP_SUMMARY

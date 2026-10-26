@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible problem with capture, recording, or the native app.
+title: 'Bug: '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem using a blank window or generated test image where possible. Reports are public: remove private screen content, file paths, account details and tokens from optional attachments or logs. You do not need to share your desktop to report a bug.
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Include any error message and whether the problem happens every time.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the app...
+        2. Choose...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version or source commit
+      placeholder: Version, commit, or approximate build date
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and build
+      description: Run winver to find the version and OS build.
+      placeholder: Windows 11, version ..., OS build ...
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Relevant setup
+      description: For example, display count/scaling, HDR, GPU, keyboard model, or chosen shortcut. Include only what relates to the problem.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Optional logs or synthetic example
+      description: Paste a relevant redacted log excerpt or attach an example made with nonprivate test content. Mention checks already tried.

@@ -1,0 +1,16 @@
+[package]
+name = "ovi-core-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "ovi_core"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+ovi-image-core = { path = "../core" }
+
+[dev-dependencies]
+png.workspace = true

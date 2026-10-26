@@ -1,0 +1,278 @@
+<div id="capture-workflow">
+  <div class="nav nav-pills" role="tablist" aria-label="Screenshot workflow">
+    <button class="nav-link active" id="cw-tab-capture" role="tab" aria-controls="cw-capture" aria-selected="true" type="button">Capture overlay</button>
+    <button class="nav-link" id="cw-tab-preview" role="tab" aria-controls="cw-preview" aria-selected="false" type="button">Floating preview</button>
+    <button class="nav-link" id="cw-tab-editor" role="tab" aria-controls="cw-editor" aria-selected="false" type="button">Annotation editor</button>
+    <button class="nav-link" id="cw-tab-history" role="tab" aria-controls="cw-history" aria-selected="false" type="button">History</button>
+  </div>
+
+  <div class="cw-product">
+    <section id="cw-capture" class="cw-stage cw-desktop" role="tabpanel" aria-labelledby="cw-tab-capture">
+      <div class="cw-notes cw-source-window">
+        <div class="cw-nativebar"><span>Project notes</span><span aria-hidden="true">— &nbsp; □ &nbsp; ×</span></div>
+        <div class="cw-notes-body"><span class="cw-eyebrow">TEAM / RELEASE</span><h2>Make the next step clear.</h2><p>Release checklist</p><div class="cw-check">✓ &nbsp; Review the new capture workflow</div><div class="cw-check">✓ &nbsp; Test keyboard shortcuts</div><div class="cw-check">□ &nbsp; Share the final screenshots</div><hr><p class="cw-muted">Keep feedback close to the work.</p></div>
+      </div>
+      <div class="cw-selection" aria-label="Selected screenshot region">
+        <span class="cw-selection-corner cw-tl"></span><span class="cw-selection-corner cw-tr"></span><span class="cw-selection-corner cw-bl"></span><span class="cw-selection-corner cw-br"></span>
+        <span class="cw-dimensions">960 × 600 px</span>
+        <button type="button" class="cw-capture-action cursor-interaction" data-next="preview"><i data-lucide="scan" aria-hidden="true"></i>Preview capture</button>
+      </div>
+      <div class="cw-magnifier" aria-label="Magnifier beside pointer"><div class="cw-pixels"><span>+</span></div><span>Pixel precision</span></div>
+      <div class="cw-capture-modes" aria-label="Capture modes">
+        <button type="button" class="cw-control cursor-interaction" aria-pressed="true" data-mode="Area"><i data-lucide="scan" aria-hidden="true"></i>Area</button>
+        <button type="button" class="cw-control cursor-interaction" aria-pressed="false" data-mode="Window"><i data-lucide="app-window" aria-hidden="true"></i>Window</button>
+        <button type="button" class="cw-control cursor-interaction" aria-pressed="false" data-mode="Screen"><i data-lucide="monitor" aria-hidden="true"></i>Screen</button>
+        <span class="cw-key">Esc to cancel</span>
+      </div>
+    </section>
+
+    <section id="cw-preview" class="cw-stage cw-desktop" role="tabpanel" aria-labelledby="cw-tab-preview" hidden>
+      <div class="cw-notes cw-source-window">
+        <div class="cw-nativebar"><span>Project notes</span><span aria-hidden="true">— &nbsp; □ &nbsp; ×</span></div>
+        <div class="cw-notes-body"><span class="cw-eyebrow">TEAM / RELEASE</span><h2>Make the next step clear.</h2><p>Release checklist</p><div class="cw-check">✓ &nbsp; Review the new capture workflow</div><div class="cw-check">✓ &nbsp; Test keyboard shortcuts</div><div class="cw-check">□ &nbsp; Share the final screenshots</div><hr><p class="cw-muted">Keep feedback close to the work.</p></div>
+      </div>
+      <div class="cw-preview-card" aria-label="Floating screenshot preview">
+        <div class="cw-preview-heading"><span>Screenshot</span><button type="button" class="cw-icon cursor-interaction" data-dismiss aria-label="Dismiss preview"><i data-lucide="x" aria-hidden="true"></i></button></div>
+        <button type="button" class="cw-thumbnail cursor-interaction" data-next="editor" aria-label="Open screenshot in editor"><span class="cw-mini-page"><span>Release checklist</span><span>✓ Review capture workflow</span><span>✓ Test keyboard shortcuts</span><span>□ Share screenshots</span></span></button>
+        <div class="cw-preview-actions"><button type="button" class="cw-control cursor-interaction" data-action="Copy"><i data-lucide="copy" aria-hidden="true"></i>Copy</button><button type="button" class="cw-control cursor-interaction" data-action="Save"><i data-lucide="download" aria-hidden="true"></i>Save</button><button type="button" class="cw-control cw-primary cursor-interaction" data-next="editor"><i data-lucide="pencil" aria-hidden="true"></i>Annotate</button></div>
+        <span class="cw-muted cw-preview-hint">Drag the thumbnail to another app</span>
+      </div>
+      <div class="cw-taskbar" aria-hidden="true"><i data-lucide="grid-2x2"></i><span>Search</span><i data-lucide="folder"></i><i data-lucide="mail"></i></div>
+    </section>
+
+    <section id="cw-editor" class="cw-editor-window" role="tabpanel" aria-labelledby="cw-tab-editor" hidden>
+      <div class="cw-nativebar"><span><i data-lucide="scan" aria-hidden="true"></i>Screenshot editor</span><span aria-hidden="true">— &nbsp; □ &nbsp; ×</span></div>
+      <div class="cw-commandbar"><div class="cw-undo"><button type="button" class="cw-icon cursor-interaction" data-undo aria-label="Undo annotation"><i data-lucide="undo-2" aria-hidden="true"></i></button><button type="button" class="cw-icon cursor-interaction" data-redo aria-label="Redo annotation"><i data-lucide="redo-2" aria-hidden="true"></i></button></div><span class="cw-document-title">Screenshot · 960 × 600</span><div class="cw-export"><button type="button" class="cw-control cursor-interaction" data-action="Copy"><i data-lucide="copy" aria-hidden="true"></i>Copy</button><button type="button" class="cw-control cw-primary cursor-interaction" data-action="Save"><i data-lucide="download" aria-hidden="true"></i>Save</button></div></div>
+      <div class="cw-tools" aria-label="Annotation tools">
+        <button type="button" class="cw-tool cursor-interaction" data-tool="Select" aria-label="Select tool" aria-pressed="false"><i data-lucide="mouse-pointer-2" aria-hidden="true"></i><span>Select</span></button>
+        <button type="button" class="cw-tool cursor-interaction" data-tool="Crop" aria-label="Crop tool" aria-pressed="false"><i data-lucide="crop" aria-hidden="true"></i><span>Crop</span></button>
+        <button type="button" class="cw-tool cursor-interaction" data-tool="Arrow" aria-label="Arrow tool" aria-pressed="true"><i data-lucide="move-up-right" aria-hidden="true"></i><span>Arrow</span></button>
+        <button type="button" class="cw-tool cursor-interaction" data-tool="Rectangle" aria-label="Rectangle tool" aria-pressed="false"><i data-lucide="square" aria-hidden="true"></i><span>Rectangle</span></button>
+        <button type="button" class="cw-tool cursor-interaction" data-tool="Text" aria-label="Text tool" aria-pressed="false"><i data-lucide="type" aria-hidden="true"></i><span>Text</span></button>
+        <button type="button" class="cw-tool cursor-interaction" data-tool="Highlight" aria-label="Highlighter tool" aria-pressed="false"><i data-lucide="highlighter" aria-hidden="true"></i><span>Highlight</span></button>
+        <button type="button" class="cw-tool cursor-interaction" data-tool="Redact" aria-label="Solid redaction tool" aria-pressed="false"><i data-lucide="shield" aria-hidden="true"></i><span>Redact</span></button>
+        <button type="button" class="cw-tool cw-background-toggle cursor-interaction" data-inspector aria-label="Toggle background panel" aria-pressed="true"><i data-lucide="panel-right" aria-hidden="true"></i><span>Background</span></button>
+      </div>
+      <div class="cw-context"><span class="cw-tool-name">Arrow</span><label data-context="color">Color <input class="cw-annotation-color" type="color" value="#d94a38" aria-label="Annotation color"></label><label data-context="width">Width <select aria-label="Annotation width"><option value="4">4 px</option><option value="2">2 px</option><option value="8">8 px</option></select></label><label data-context="crop" hidden>Ratio <select aria-label="Crop aspect ratio"><option>Free</option><option>16:9</option><option>1:1</option></select></label><label data-context="text" hidden>Size <select aria-label="Text size"><option>24 px</option><option>16 px</option><option>32 px</option></select></label><span data-context="redact" hidden>Solid opaque fill</span></div>
+      <div class="cw-editor-content">
+        <div class="cw-canvas" aria-label="Screenshot editing canvas">
+          <div class="cw-image-frame"><div class="cw-captured-page"><span class="cw-eyebrow">TEAM / RELEASE</span><h2>Release checklist</h2><div class="cw-check">✓ &nbsp; Review capture workflow</div><div class="cw-check">✓ &nbsp; Test keyboard shortcuts</div><div class="cw-check cw-highlight-target">□ &nbsp; Share screenshots</div><hr><p class="cw-muted">Keep feedback close to the work.</p><div class="cw-annotation-arrow" aria-label="Example arrow annotation"></div></div></div>
+        </div>
+        <aside class="cw-inspector" aria-label="Background appearance"><div class="cw-inspector-title">Background</div><label>Fill <select class="cw-background-fill"><option value="gradient">Soft gradient</option><option value="solid">Solid color</option></select></label><label>Padding <span class="cw-padding-value">32 px</span><input class="cw-padding" type="range" min="0" max="64" value="32" step="8"></label><label>Corner radius <select class="cw-radius"><option value="12">12 px</option><option value="0">None</option><option value="24">24 px</option></select></label><label class="cw-check-label"><input type="checkbox" class="cw-shadow" checked>Shadow</label></aside>
+      </div>
+      <footer class="cw-footer"><span>960 × 600 px · PNG</span><span>Fit <button type="button" class="cw-control cursor-interaction" data-zoom="-" aria-label="Zoom out">−</button><span class="cw-zoom-value">75%</span><button type="button" class="cw-control cursor-interaction" data-zoom="+" aria-label="Zoom in">+</button></span></footer>
+    </section>
+
+    <section id="cw-history" class="cw-history-window" role="tabpanel" aria-labelledby="cw-tab-history" hidden>
+      <div class="cw-nativebar"><span>Capture history</span><span aria-hidden="true">— &nbsp; □ &nbsp; ×</span></div>
+      <div class="cw-history-toolbar"><label class="cw-search"><i data-lucide="search" aria-hidden="true"></i><input type="search" placeholder="Search captures" aria-label="Search captures"></label><button type="button" class="cw-control cursor-interaction" data-settings><i data-lucide="settings-2" aria-hidden="true"></i>Settings</button><button type="button" class="cw-control cw-primary cursor-interaction" data-next="capture"><i data-lucide="scan" aria-hidden="true"></i>Capture</button></div>
+      <div class="cw-history-body"><h3>Today</h3><div class="cw-history-grid">
+        <button type="button" class="cw-history-item cursor-interaction" data-title="Release checklist" data-next="editor"><span class="cw-history-thumb"><span>Release checklist</span><span>✓ Review capture workflow</span><span>□ Share screenshots</span></span><span>Release checklist</span><small>14:32 · 960 × 600</small></button>
+        <button type="button" class="cw-history-item cursor-interaction" data-title="Keyboard shortcuts" data-next="editor"><span class="cw-history-thumb"><span>Keyboard shortcuts</span><span>Capture an area</span><span>Copy / Save / Annotate</span></span><span>Keyboard shortcuts</span><small>14:18 · 1280 × 720</small></button>
+        <button type="button" class="cw-history-item cursor-interaction" data-title="Design feedback" data-next="editor"><span class="cw-history-thumb"><span>Design feedback</span><span>Make the next step clear.</span><span>Keep feedback close.</span></span><span>Design feedback</span><small>13:56 · 840 × 560</small></button>
+      </div><p class="cw-history-empty" hidden>No matching captures</p></div>
+      <div class="cw-settings" hidden role="dialog" aria-modal="true" aria-label="Screenshot settings"><div class="cw-settings-title"><span>Settings</span><button type="button" class="cw-icon cursor-interaction" data-close-settings aria-label="Close settings"><i data-lucide="x" aria-hidden="true"></i></button></div><label>Capture shortcut <input value="Ctrl + Shift + 4" readonly aria-label="Proposed capture shortcut"></label><label>Preview position <select><option>Bottom-right of capture display</option><option>Bottom-left of capture display</option></select></label><label>Keep local history <select><option>7 days</option><option>1 day</option><option>30 days</option><option>Off</option></select></label><label class="cw-check-label"><input type="checkbox">Launch at sign-in</label><button type="button" class="cw-control cw-primary cursor-interaction" data-close-settings>Done</button></div>
+    </section>
+    <div class="cw-status" role="status" aria-live="polite">Layout preview · choose a screen above</div>
+  </div>
+</div>
+
+<style>
+  #capture-workflow .cw-product{--cw-surface:light-dark(#fafafa,#202020);--cw-panel:light-dark(#f2f3f5,#292929);--cw-ink:light-dark(#202124,#f3f3f3);--cw-secondary:light-dark(#5c626a,#bfc4cc);--cw-line:light-dark(#d9dce1,#45484d);--cw-accent:light-dark(#0f6cbd,#60b7ff);--cw-on-accent:light-dark(#fff,#10263b);--cw-paper:light-dark(#fff,#25282d);--cw-desktop:light-dark(#c8dce8,#172735);--cw-selection:#62c5ff;--cw-dim:light-dark(#15212c77,#02080ca8);--cw-shadow:light-dark(#23364a33,#0008);--cw-highlight:light-dark(#f6da8670,#d8a72f55);--cw-annotation:#d94a38;color:var(--cw-ink);font:14px/1.45 'Segoe UI Variable','Segoe UI',system-ui,sans-serif;margin-top:14px;color-scheme:light dark}
+  #capture-workflow .cw-product *{box-sizing:border-box}
+  #capture-workflow .cw-product button,#capture-workflow .cw-product input,#capture-workflow .cw-product select{font:inherit;color:inherit}
+  #capture-workflow .cw-product button{font-weight:400}
+  #capture-workflow .cw-product h2{font-size:26px;line-height:1.2;font-weight:500;margin:12px 0 22px}
+  #capture-workflow .cw-product h3{font-size:15px;font-weight:500;margin:0 0 18px}
+  #capture-workflow .cw-product p{margin:14px 0}
+  #capture-workflow .cw-product hr{border:0;border-top:1px solid var(--cw-line);margin:22px 0}
+  #capture-workflow .cw-product [hidden]{display:none!important}
+  #capture-workflow .cw-stage{height:550px;position:relative;overflow:hidden;border-radius:10px}
+  #capture-workflow .cw-desktop{background:radial-gradient(ellipse at 10% 95%,light-dark(#9ebfc5,#304449),transparent 70%),var(--cw-desktop)}
+  #capture-workflow .cw-nativebar{display:flex;justify-content:space-between;align-items:center;min-height:38px;padding:0 14px;background:var(--cw-panel);font-size:12px;gap:12px}
+  #capture-workflow .cw-nativebar>span:first-child{display:flex;align-items:center;gap:9px;min-width:0}
+  #capture-workflow .cw-nativebar>span:last-child{white-space:nowrap}
+  #capture-workflow .cw-notes{background:var(--cw-paper);border:1px solid var(--cw-line);border-radius:8px;box-shadow:0 12px 35px var(--cw-shadow)}
+  #capture-workflow .cw-source-window{position:absolute;left:9%;top:9%;width:73%;height:76%;overflow:hidden}
+  #capture-workflow .cw-notes-body{padding:32px 42px}
+  #capture-workflow .cw-eyebrow{font-size:11px;letter-spacing:.09em;color:var(--cw-secondary)}
+  #capture-workflow .cw-check{margin:14px 0}
+  #capture-workflow .cw-muted{color:var(--cw-secondary)}
+  #capture-workflow .cw-selection{position:absolute;left:20%;top:22%;width:57%;height:49%;border:1px solid var(--cw-selection);box-shadow:0 0 0 1000px var(--cw-dim);display:flex;align-items:flex-end;justify-content:flex-end;padding:12px}
+  #capture-workflow .cw-selection-corner{width:8px;height:8px;background:var(--cw-paper);border:1px solid var(--cw-selection);position:absolute}
+  #capture-workflow .cw-tl{left:-4px;top:-4px}#capture-workflow .cw-tr{right:-4px;top:-4px}#capture-workflow .cw-bl{left:-4px;bottom:-4px}#capture-workflow .cw-br{right:-4px;bottom:-4px}
+  #capture-workflow .cw-dimensions{position:absolute;bottom:-34px;right:0;padding:4px 8px;border-radius:5px;background:var(--cw-surface);font-size:12px;white-space:nowrap}
+  #capture-workflow .cw-capture-action{background:var(--cw-surface);border:1px solid var(--cw-line);border-radius:6px;padding:8px 12px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px var(--cw-shadow)}
+  #capture-workflow .cw-magnifier{position:absolute;top:11%;right:6%;width:110px;border:1px solid var(--cw-line);background:var(--cw-surface);border-radius:9px;overflow:hidden;box-shadow:0 6px 18px var(--cw-shadow);text-align:center;font-size:11px}
+  #capture-workflow .cw-pixels{height:76px;display:grid;place-items:center;background:repeating-linear-gradient(0deg,transparent 0 11px,var(--cw-line) 11px 12px),repeating-linear-gradient(90deg,var(--cw-panel) 0 11px,var(--cw-line) 11px 12px)}
+  #capture-workflow .cw-pixels span{font-size:28px;color:var(--cw-accent)}
+  #capture-workflow .cw-magnifier>span{display:block;padding:5px}
+  #capture-workflow .cw-capture-modes{position:absolute;bottom:23px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:8px;background:var(--cw-surface);border:1px solid var(--cw-line);border-radius:10px;box-shadow:0 8px 30px var(--cw-shadow);white-space:nowrap;max-width:calc(100% - 24px);flex-wrap:wrap;justify-content:center}
+  #capture-workflow .cw-key{font-size:11px;color:var(--cw-secondary);padding:0 7px}
+  #capture-workflow .cw-control{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--cw-line);border-radius:5px;background:var(--cw-surface);padding:7px 11px;white-space:nowrap;min-height:32px}
+  #capture-workflow .cw-primary,#capture-workflow .cw-control[aria-pressed=true]{background:var(--cw-accent);border-color:var(--cw-accent);color:var(--cw-on-accent)}
+  #capture-workflow .cw-icon{border:0;border-radius:4px;background:transparent;display:inline-flex;align-items:center;justify-content:center;min-width:30px;min-height:30px;padding:6px}
+  #capture-workflow .cw-product button:hover{filter:brightness(.97)}
+  #capture-workflow .cw-product svg{width:16px;height:16px;flex-shrink:0}
+  #capture-workflow .cw-preview-card{position:absolute;right:20px;bottom:72px;width:300px;border-radius:10px;background:var(--cw-surface);box-shadow:0 12px 35px var(--cw-shadow);border:1px solid var(--cw-line);padding:10px}
+  #capture-workflow .cw-preview-heading{display:flex;align-items:center;justify-content:space-between;padding:0 2px 7px;font-size:12px}
+  #capture-workflow .cw-thumbnail{display:block;width:100%;border:0;border-radius:5px;padding:15px;background:var(--cw-panel);text-align:left}
+  #capture-workflow .cw-mini-page{display:grid;gap:9px;background:var(--cw-paper);padding:17px 15px;border-radius:3px;font-size:11px;box-shadow:0 3px 10px var(--cw-shadow)}
+  #capture-workflow .cw-mini-page>span:first-child{font-size:14px;font-weight:500;margin-bottom:4px}
+  #capture-workflow .cw-preview-actions{display:flex;gap:6px;margin-top:10px}
+  #capture-workflow .cw-preview-actions>.cw-control{flex:1;padding:6px;font-size:12px}
+  #capture-workflow .cw-preview-hint{display:block;text-align:center;font-size:11px;margin-top:8px}
+  #capture-workflow .cw-taskbar{position:absolute;bottom:0;left:0;right:0;height:48px;background:var(--cw-panel);display:flex;justify-content:center;align-items:center;gap:26px}
+  #capture-workflow .cw-taskbar span{background:var(--cw-surface);border-radius:15px;padding:4px 50px 4px 14px;color:var(--cw-secondary);font-size:12px}
+  #capture-workflow .cw-editor-window,#capture-workflow .cw-history-window{position:relative;background:var(--cw-surface);border:1px solid var(--cw-line);border-radius:10px;overflow:hidden;min-height:550px}
+  #capture-workflow .cw-commandbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid var(--cw-line)}
+  #capture-workflow .cw-undo,#capture-workflow .cw-export{display:flex;align-items:center;gap:6px}
+  #capture-workflow .cw-document-title{font-size:12px;color:var(--cw-secondary);text-align:center}
+  #capture-workflow .cw-tools{display:flex;align-items:center;gap:3px;flex-wrap:wrap;padding:8px 12px;background:var(--cw-panel);border-bottom:1px solid var(--cw-line)}
+  #capture-workflow .cw-tool{border:1px solid transparent;background:transparent;display:flex;align-items:center;gap:7px;border-radius:5px;padding:8px;font-size:12px!important}
+  #capture-workflow .cw-tool[aria-pressed=true]{border-color:var(--cw-line);background:var(--cw-surface)}
+  #capture-workflow .cw-background-toggle{margin-left:auto}
+  #capture-workflow .cw-context{display:flex;align-items:center;flex-wrap:wrap;gap:18px;min-height:42px;padding:7px 16px;border-bottom:1px solid var(--cw-line);font-size:12px}
+  #capture-workflow .cw-context label{display:flex;align-items:center;gap:8px}
+  #capture-workflow .cw-context select{border:1px solid var(--cw-line);background:var(--cw-surface);padding:3px;border-radius:4px}
+  #capture-workflow .cw-context input[type=color]{height:23px;width:28px;padding:0;border:0;background:transparent}
+  #capture-workflow .cw-tool-name{color:var(--cw-secondary);min-width:53px}
+  #capture-workflow .cw-editor-content{display:flex;min-height:340px}
+  #capture-workflow .cw-canvas{background:var(--cw-panel);flex:1;min-width:0;display:flex;justify-content:center;align-items:center;padding:28px;overflow:hidden}
+  #capture-workflow .cw-image-frame{width:min(100%,540px);padding:32px;background:linear-gradient(125deg,light-dark(#cadaef,#374d70),light-dark(#dfd3e9,#594565));border-radius:4px}
+  #capture-workflow .cw-captured-page{position:relative;padding:25px;background:var(--cw-paper);border-radius:12px;box-shadow:0 10px 25px var(--cw-shadow);font-size:12px;transform-origin:center}
+  #capture-workflow .cw-captured-page h2{font-size:23px;margin-bottom:22px}
+  #capture-workflow .cw-captured-page .cw-check{margin:14px 0}
+  #capture-workflow .cw-annotation-arrow{position:absolute;right:12%;top:47%;width:60px;height:var(--cw-arrow-width,4px);border-radius:3px;background:var(--cw-annotation);transform:rotate(145deg);transform-origin:left}
+  #capture-workflow .cw-annotation-arrow:after{content:'';position:absolute;right:0;top:-5px;width:12px;height:12px;border-top:var(--cw-arrow-width,4px) solid var(--cw-annotation);border-right:var(--cw-arrow-width,4px) solid var(--cw-annotation);transform:rotate(45deg)}
+  #capture-workflow .cw-inspector{width:220px;flex-shrink:0;padding:20px 18px;border-left:1px solid var(--cw-line);background:var(--cw-surface);font-size:12px}
+  #capture-workflow .cw-inspector-title{font-size:14px;font-weight:500;margin-bottom:18px}
+  #capture-workflow .cw-inspector>label{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:9px;margin-bottom:22px}
+  #capture-workflow .cw-inspector select{background:var(--cw-panel);border:1px solid var(--cw-line);border-radius:5px;padding:6px;width:100%}
+  #capture-workflow .cw-inspector input[type=range]{width:100%;accent-color:var(--cw-accent)}
+  #capture-workflow .cw-check-label{justify-content:flex-start!important}
+  #capture-workflow .cw-check-label input{accent-color:var(--cw-accent)}
+  #capture-workflow .cw-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;border-top:1px solid var(--cw-line);font-size:11px;color:var(--cw-secondary)}
+  #capture-workflow .cw-footer>span:last-child{display:flex;align-items:center;gap:8px}
+  #capture-workflow .cw-footer .cw-control{padding:2px 8px;min-height:24px}
+  #capture-workflow .cw-history-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:18px;border-bottom:1px solid var(--cw-line)}
+  #capture-workflow .cw-search{display:flex;align-items:center;gap:8px;flex:1;min-width:150px;border:1px solid var(--cw-line);padding:7px 10px;background:var(--cw-paper);border-radius:5px}
+  #capture-workflow .cw-search input{background:transparent;border:0;min-width:0;width:100%;outline-offset:4px}
+  #capture-workflow .cw-history-body{padding:24px}
+  #capture-workflow .cw-history-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+  #capture-workflow .cw-history-item{display:flex;flex-direction:column;gap:8px;align-items:stretch;background:transparent;border:0;padding:0;text-align:left;min-width:0}
+  #capture-workflow .cw-history-item small{color:var(--cw-secondary);font-size:11px}
+  #capture-workflow .cw-history-thumb{min-height:150px;background:var(--cw-panel);border:1px solid var(--cw-line);border-radius:6px;padding:24px 16px;display:flex;flex-direction:column;gap:12px;font-size:11px}
+  #capture-workflow .cw-history-thumb>span:first-child{font-size:14px;font-weight:500}
+  #capture-workflow .cw-settings{position:absolute;top:60px;left:50%;transform:translateX(-50%);width:min(370px,calc(100% - 28px));background:var(--cw-surface);border:1px solid var(--cw-line);box-shadow:0 12px 70px var(--cw-shadow);border-radius:10px;padding:20px;z-index:4}
+  #capture-workflow .cw-settings-title{display:flex;align-items:center;justify-content:space-between;font-weight:500;margin-bottom:20px}
+  #capture-workflow .cw-settings>label{display:flex;flex-direction:column;gap:8px;margin:16px 0;font-size:12px}
+  #capture-workflow .cw-settings select,#capture-workflow .cw-settings input[readonly]{width:100%;padding:8px;background:var(--cw-panel);border:1px solid var(--cw-line);border-radius:5px}
+  #capture-workflow .cw-settings .cw-check-label{flex-direction:row;align-items:center}
+  #capture-workflow .cw-status{font-size:12px;min-height:30px;display:flex;align-items:center;padding:8px 2px;color:var(--cw-secondary)}
+  @media(max-width:760px){#capture-workflow .cw-tool{padding:8px 7px}#capture-workflow .cw-tool span{display:none}#capture-workflow .cw-background-toggle span{display:inline}#capture-workflow .cw-inspector{width:190px;padding:16px 12px}#capture-workflow .cw-canvas{padding:20px}#capture-workflow .cw-image-frame{padding:22px}#capture-workflow .cw-captured-page{padding:18px}#capture-workflow .cw-captured-page h2{font-size:20px}#capture-workflow .cw-history-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:520px){#capture-workflow .cw-stage{height:520px}#capture-workflow .cw-source-window{left:5%;width:90%;top:7%;height:77%}#capture-workflow .cw-notes-body{padding:24px 20px}#capture-workflow .cw-notes h2{font-size:23px}#capture-workflow .cw-selection{left:12%;top:23%;width:76%;height:43%;padding:10px}#capture-workflow .cw-magnifier{right:5%;top:8%;width:85px}#capture-workflow .cw-pixels{height:50px}#capture-workflow .cw-capture-modes{width:calc(100% - 24px);bottom:15px;gap:4px}#capture-workflow .cw-key{width:100%;text-align:center;padding-top:3px}#capture-workflow .cw-preview-card{width:min(300px,calc(100% - 28px));right:14px;bottom:65px}#capture-workflow .cw-commandbar{flex-wrap:wrap;padding:8px;gap:6px}#capture-workflow .cw-document-title{order:3;width:100%;text-align:left;padding:3px 6px}#capture-workflow .cw-tools{padding:6px;gap:1px}#capture-workflow .cw-tool{padding:8px 7px}#capture-workflow .cw-background-toggle{margin-left:0}#capture-workflow .cw-background-toggle span{display:none}#capture-workflow .cw-editor-content{flex-direction:column}#capture-workflow .cw-canvas{min-height:310px;padding:20px}#capture-workflow .cw-inspector{width:100%;border-left:0;border-top:1px solid var(--cw-line);display:grid;grid-template-columns:1fr 1fr;gap:12px}#capture-workflow .cw-inspector-title{grid-column:1/-1;margin:0}#capture-workflow .cw-inspector>label{margin-bottom:4px}#capture-workflow .cw-captured-page{padding:16px 13px}#capture-workflow .cw-captured-page h2{font-size:20px}#capture-workflow .cw-history-body{padding:18px}#capture-workflow .cw-history-grid{grid-template-columns:1fr}#capture-workflow .cw-history-thumb{min-height:130px}#capture-workflow .cw-footer{flex-wrap:wrap}#capture-workflow .cw-context{gap:12px}#capture-workflow .cw-history-window{min-height:550px}}
+  @media(pointer:coarse){#capture-workflow .cw-control,#capture-workflow .cw-icon,#capture-workflow .cw-tool{min-height:44px;min-width:44px}#capture-workflow .cw-product input,#capture-workflow .cw-product select{font-size:16px}}
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById('capture-workflow');
+  const product = root.querySelector('.cw-product');
+  const status = root.querySelector('.cw-status');
+  const state = { screen: 'capture', inspector: true, previewWidth: 300, magnifier: true, zoom: 75 };
+  const knownScreens = ['capture','preview','editor','history'];
+  const say = message => { status.textContent = message; };
+  const showScreen = name => {
+    if (!knownScreens.includes(name)) return;
+    state.screen = name;
+    knownScreens.forEach(screen => {
+      const active = screen === name;
+      root.querySelector('#cw-' + screen).hidden = !active;
+      const tab = root.querySelector('#cw-tab-' + screen);
+      tab.setAttribute('aria-selected', String(active));
+      tab.classList.toggle('active', active);
+    });
+    say(name === 'capture' ? 'Drag-release captures an area · the button previews the next step' : name === 'preview' ? 'Preview appears on the capture display without taking keyboard focus' : name === 'editor' ? 'Choose a tool or adjust the screenshot background' : 'Open a capture to continue editing');
+  };
+  const renderDesign = () => {
+    root.querySelector('.cw-inspector').hidden = !state.inspector;
+    root.querySelector('[data-inspector]').setAttribute('aria-pressed', String(state.inspector));
+    root.querySelector('.cw-preview-card').style.width = 'min(' + state.previewWidth + 'px, calc(100% - 28px))';
+    root.querySelector('.cw-magnifier').hidden = !state.magnifier;
+  };
+  const persist = () => {
+    if (window.openai && window.openai.setWidgetState) {
+      window.openai.setWidgetState({ modelContent: { screenshotLayout: state.screen, backgroundInspector: state.inspector }, privateContent: { ...state } }).catch(() => {});
+    }
+  };
+  const applySaved = saved => {
+    if (!saved) return;
+    const p = saved.privateContent || saved;
+    if (typeof p.inspector === 'boolean') state.inspector = p.inspector;
+    if (typeof p.magnifier === 'boolean') state.magnifier = p.magnifier;
+    if (typeof p.previewWidth === 'number' && p.previewWidth >= 260 && p.previewWidth <= 360) state.previewWidth = p.previewWidth;
+    if (knownScreens.includes(p.screen)) showScreen(p.screen);
+    renderDesign();
+  };
+  root.querySelectorAll('[role="tab"]').forEach(tab => tab.addEventListener('click', () => { showScreen(tab.id.replace('cw-tab-','')); persist(); }));
+  root.querySelectorAll('[data-next]').forEach(button => button.addEventListener('click', () => {
+    if (button.dataset.title) root.querySelector('.cw-document-title').textContent = button.dataset.title;
+    root.querySelector('.cw-preview-card').hidden = false;
+    showScreen(button.dataset.next); persist();
+  }));
+  root.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => {
+    root.querySelectorAll('[data-mode]').forEach(peer => peer.setAttribute('aria-pressed', String(peer === button)));
+    say(button.dataset.mode === 'Area' ? 'Drag a region; release to capture' : button.dataset.mode === 'Window' ? 'Window mode: hover highlights a window; click captures it' : 'Screen mode: click a display to capture it');
+  }));
+  root.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => say(button.dataset.action === 'Copy' ? 'Copy preview: the rendered image goes to the system clipboard' : 'Save preview: a native file dialog chooses the PNG destination')));
+  root.querySelector('[data-dismiss]').addEventListener('click', () => { root.querySelector('.cw-preview-card').hidden = true; say('Preview dismissed · the capture remains in local history'); });
+  root.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
+    root.querySelectorAll('[data-tool]').forEach(peer => peer.setAttribute('aria-pressed', String(peer === button)));
+    root.querySelector('.cw-tool-name').textContent = button.dataset.tool;
+    const tool = button.dataset.tool;
+    root.querySelector('[data-context="color"]').hidden = !['Arrow','Rectangle','Text','Highlight'].includes(tool);
+    root.querySelector('[data-context="width"]').hidden = !['Arrow','Rectangle','Highlight'].includes(tool);
+    root.querySelector('[data-context="crop"]').hidden = tool !== 'Crop';
+    root.querySelector('[data-context="text"]').hidden = tool !== 'Text';
+    root.querySelector('[data-context="redact"]').hidden = tool !== 'Redact';
+    say(button.dataset.tool + ' tool selected · this layout preview does not edit image pixels');
+  }));
+  root.querySelector('[data-inspector]').addEventListener('click', () => { state.inspector = !state.inspector; renderDesign(); persist(); });
+  root.querySelector('.cw-padding').addEventListener('input', event => {
+    root.querySelector('.cw-padding-value').textContent = event.target.value + ' px';
+    root.querySelector('.cw-image-frame').style.padding = event.target.value + 'px';
+  });
+  root.querySelector('.cw-radius').addEventListener('change', event => { root.querySelector('.cw-captured-page').style.borderRadius = event.target.value + 'px'; });
+  root.querySelector('.cw-shadow').addEventListener('change', event => { root.querySelector('.cw-captured-page').style.boxShadow = event.target.checked ? '0 10px 25px var(--cw-shadow)' : 'none'; });
+  root.querySelector('.cw-background-fill').addEventListener('change', event => { root.querySelector('.cw-image-frame').style.background = event.target.value === 'solid' ? 'var(--cw-desktop)' : ''; });
+  root.querySelector('.cw-annotation-color').addEventListener('input', event => { product.style.setProperty('--cw-annotation', event.target.value); });
+  root.querySelector('[aria-label="Annotation width"]').addEventListener('change', event => { product.style.setProperty('--cw-arrow-width', event.target.value + 'px'); });
+  root.querySelectorAll('[data-zoom]').forEach(button => button.addEventListener('click', () => {
+    state.zoom = Math.max(25, Math.min(100, state.zoom + (button.dataset.zoom === '+' ? 10 : -10)));
+    root.querySelector('.cw-zoom-value').textContent = state.zoom + '%';
+    root.querySelector('.cw-captured-page').style.transform = 'scale(' + state.zoom / 75 + ')';
+  }));
+  root.querySelector('[data-undo]').addEventListener('click', () => { root.querySelector('.cw-annotation-arrow').hidden = true; say('Example arrow removed'); });
+  root.querySelector('[data-redo]').addEventListener('click', () => { root.querySelector('.cw-annotation-arrow').hidden = false; say('Example arrow restored'); });
+  const settings = root.querySelector('.cw-settings');
+  root.querySelector('[data-settings]').addEventListener('click', () => { settings.hidden = false; root.querySelector('[role="tablist"]').inert = true; root.querySelector('.cw-history-toolbar').inert = true; root.querySelector('.cw-history-body').inert = true; settings.querySelector('button').focus(); });
+  const closeSettings = () => { settings.hidden = true; root.querySelector('[role="tablist"]').inert = false; root.querySelector('.cw-history-toolbar').inert = false; root.querySelector('.cw-history-body').inert = false; root.querySelector('[data-settings]').focus(); };
+  root.querySelectorAll('[data-close-settings]').forEach(button => button.addEventListener('click', closeSettings));
+  settings.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeSettings(); } });
+  root.querySelector('input[type=search]').addEventListener('input', event => {
+    const query = event.target.value.toLowerCase(); let visible = 0;
+    root.querySelectorAll('.cw-history-item').forEach(item => { item.hidden = !item.dataset.title.toLowerCase().includes(query); if (!item.hidden) visible++; });
+    root.querySelector('.cw-history-empty').hidden = visible > 0;
+  });
+  applySaved(window.openai && window.openai.widgetState);
+  window.addEventListener('openai:set_globals', event => { if (event.detail && event.detail.globals) applySaved(event.detail.globals.widgetState); });
+  renderDesign();
+  if (globalThis.Tweak) {
+    const tweak = new Tweak({ container: product, onChange: () => { renderDesign(); persist(); } });
+    tweak.addSlider(state, 'previewWidth', { label: 'Preview width', min: 260, max: 360, step: 10, unit: 'px' });
+    tweak.addToggle(state, 'inspector', { label: 'Background panel open' });
+    tweak.addToggle(state, 'magnifier', { label: 'Capture magnifier' });
+  }
+})();
+</script>

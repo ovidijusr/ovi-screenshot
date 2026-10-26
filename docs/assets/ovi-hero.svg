@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
+  <title id="title">Ovi Screenshot — Capture. Keep. Share.</title>
+  <desc id="desc">Windows 11 preview. A native screenshot utility, with an abstract capture-frame workflow illustration, not an app screenshot.</desc>
+  <defs>
+    <clipPath id="scene"><rect x="858" y="106" width="286" height="202" rx="12"/></clipPath>
+  </defs>
+  <rect width="1280" height="420" rx="24" fill="#0b1423"/>
+  <g font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Arial, sans-serif">
+    <g transform="translate(72 60) scale(2)">
+      <rect width="32" height="32" rx="7" fill="#1c2c40"/>
+      <path fill="#eef7ff" d="M5 5h9v3H8v6H5zm13 0h9v9h-3V8h-6zM5 18h3v6h6v3H5zm19 0h3v9h-9v-3h6z"/>
+    </g>
+    <text x="156" y="99" font-size="17" font-weight="500" fill="#afc5db">Windows 11 · Preview</text>
+    <text x="70" y="215" font-size="66" font-weight="600" letter-spacing="-2.4" fill="#f4f8ff">Ovi Screenshot</text>
+    <text x="73" y="267" font-size="29" font-weight="400" letter-spacing="-.4" fill="#bdd2e6">Capture. Keep. Share.</text>
+    <text x="74" y="347" font-size="17" fill="#93abc2">A native screenshot utility for Windows.</text>
+
+    <!-- Abstract scene only: no simulated product controls or feature screenshots. -->
+    <rect x="840" y="88" width="322" height="238" rx="24" fill="#17283b"/>
+    <g clip-path="url(#scene)">
+      <rect x="858" y="106" width="286" height="202" fill="#294b64"/>
+      <circle cx="1074" cy="158" r="24" fill="#c6e6e8"/>
+      <path d="m823 318 123-150 150 170Z" fill="#4b8291"/>
+      <path d="m970 326 108-119 128 119Z" fill="#75b5b6"/>
+      <path d="M858 286c62-21 103-18 152 0s91 23 134 9v35H858Z" fill="#345d72"/>
+    </g>
+    <path d="M826 127V74h53m245 0h53v53M826 287v53h53m245 0h53v-53" fill="none" stroke="#d8f1fa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="m1126 277 12 43 9-14 16-5Z" fill="#f1f8ff" stroke="#0b1423" stroke-width="3" stroke-linejoin="round"/>
+    <text x="1001" y="374" text-anchor="middle" font-size="13" letter-spacing=".2" fill="#93abc2">Workflow illustration</text>
+  </g>
+</svg>

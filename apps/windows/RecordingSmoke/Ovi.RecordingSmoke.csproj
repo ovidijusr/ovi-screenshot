@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Capture\Mp4FrameEncoder.cs" Link="Mp4FrameEncoder.cs" />
+    <Compile Include="..\Capture\RecordingTimeline.cs" Link="RecordingTimeline.cs" />
+    <Compile Include="..\Capture\VideoFrameBufferPool.cs" Link="VideoFrameBufferPool.cs" />
+  </ItemGroup>
+</Project>

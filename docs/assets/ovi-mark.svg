@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Ovi Screenshot</title>
+  <desc id="desc">Four open white capture-frame corners on a rounded midnight-blue square.</desc>
+  <rect width="128" height="128" rx="28" fill="#101c2d"/>
+  <!-- The four corners use the app's 32-pixel notification-area icon geometry. -->
+  <path transform="scale(4)" fill="#eef7ff" d="M5 5h9v3H8v6H5zm13 0h9v9h-3V8h-6zM5 18h3v6h6v3H5zm19 0h3v9h-9v-3h6z"/>
+</svg>

@@ -1,0 +1,17 @@
+[workspace]
+members = ["crates/core", "crates/core-ffi"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[workspace.dependencies]
+png = "0.18"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "unwind"

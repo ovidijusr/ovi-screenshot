@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup><Compile Include="..\Interop\RustCore.cs" Link="RustCore.cs" /></ItemGroup>
+  <Target Name="CopyRustCore" AfterTargets="Build">
+    <PropertyGroup><RustCorePath Condition="'$(RustCorePath)' == ''">$(MSBuildThisFileDirectory)..\..\..\target\debug\ovi_core.dll</RustCorePath></PropertyGroup>
+    <Copy SourceFiles="$(RustCorePath)" DestinationFolder="$(OutDir)" Condition="Exists('$(RustCorePath)')" />
+  </Target>
+</Project>

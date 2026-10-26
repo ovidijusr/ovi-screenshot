@@ -1,0 +1,45 @@
+# Project instructions
+
+## Product decisions
+
+Build a CleanShot-inspired native screenshot app. Windows 11 comes first; macOS follows later. Use C#/WinUI 3 and thin Win32 adapters on Windows, SwiftUI/AppKit on macOS, and a shared Rust core. Default to a floating preview after capture and seven-day inactive cache retention. A browsable editable history is planned, not implemented. Read `docs/plan.md`, `docs/ui-spec.md`, and `docs/architecture.md` before changing product behavior.
+
+The user wants compact product UI with only useful information. Use a minimal notification-area icon: single left click starts area capture, right click offers capture/record/settings/quit. Start in the tray. Do not show resolution or technical metadata in the capture/preview UI by default. Selected-area MP4 recording is confirmed scope; use a small elapsed-time/Stop control rather than a dashboard. Keep technical details in developer documentation and logs.
+
+Screenshot previews are image-only, with slightly translucent Copy/Save/Close icon controls over the image on hover (or active keyboard focus). Preserve separate captures in a stack rather than replacing the previous preview. Hide and restore the whole stack during capture. Dragging the image exports a real PNG attachment plus native bitmap data; keep exported files available for asynchronous destination apps.
+
+Some Mac-layout keyboard screenshot buttons send Shift+Win+3. Windows reserves this chord for its third taskbar app; support the confirmed screenshot macro through narrowly scoped direct handling if RegisterHotKey rejects it. Do not infer other hardware mappings or override arbitrary conflicting Windows shortcuts. Support unmodified function keys and report other registration conflicts. The tray context menu must use modern theme-aware WinUI controls, not a legacy TrackPopupMenu menu. Capture selection must not dim the screen. Prepare the overlay before reveal, disable its own opening transition, and avoid artificial capture delays. Hide previews just before still acquisition and flush the compositor only when an app surface was visible.
+
+Ordinary app windows must use modern WinUI chrome. Settings uses the WinUI TitleBar control and AppWindowTitleBar.PreferredTheme=UseDefaultAppMode so system caption buttons follow dark/light app mode. Use dynamic theme resources for window surfaces. Keep capture previews and recording controls compact without adding permanent title bars.
+
+Video recording uses a cancellable 3–2–1 countdown after selection, then a compact rounded WinUI panel with elapsed recorded time, Pause/Resume and Stop. Paused time must be omitted from the MP4; Stop must work while paused. Keep backend timing authoritative so the UI timer cannot drift or continue during a pause.
+
+During screenshots, Space toggles window picking: highlight hovered windows and capture the selected HWND through WGC, preserving native alpha and adding an explicitly generated soft shadow on a transparent PNG canvas. Recording stays area-based. Show a click-through recording boundary (active/paused styling), excluded from capture and removed on Stop/error/quit. Video BGRA samples must declare positive top-down MF_MT_DEFAULT_STRIDE; retain asymmetric decoded orientation regression checks.
+
+Double-click a screenshot preview (or Enter on its focused image) to open its full-resolution PNG with the default image app. Reuse the retained export cache, preserve drag-and-drop, guard duplicate operations, and dismiss only after Windows accepts the launch; failure keeps the preview usable.
+
+Keep production responsibilities in focused services: app composition/lifetime in ScreenshotApp, capture selection in CaptureCoordinator, video state/export in RecordingController, persistence in SettingsStore/RecordingLibrary, and native smoke fixtures in Testing. Preserve explicit ownership and await active operations on shutdown. Portable image composition/resampling belongs in Rust ABI v2. Preview PNG storage is async and disk-backed; avoid hidden synchronous disk reads or unlimited resident payloads. Video frame buffers are bounded leases and cannot be reused before native sample consumption completes.
+
+## Team size and efficiency
+
+The user explicitly wants multiple agents for substantial work, with effort scaled to task size.
+
+- Handle small, focused changes directly with one agent. Do not create a team for a wording fix or a simple local bug.
+- For medium work with independent parts, use two focused specialists and coordinator integration.
+- For large features, use at most three specialists alongside the coordinator. Add a separate reviewer only when a coherent result is available and the review can address meaningful risk.
+- Prefer reusing an existing specialist over spawning duplicate context. Keep inherited model settings unless the user explicitly asks for a model change.
+- Give each agent a concrete deliverable, owned files, dependencies, and verification criteria. Avoid agents editing the same files concurrently.
+- Agree on shared interfaces before dependent implementation. Parallelize independent work; integrate dependent work in order.
+- Keep delegation messages and results concise. Stop redundant exploration and testing after the required checks pass.
+
+The coordinator owns scripts, project documentation, shared contracts approval, integration, and final verification. Core specialists own Rust crates/header; native specialists own their platform directory. Explicitly hand off file ownership before crossing these boundaries.
+
+## Validation and reporting
+
+Prove real capture pixels travel through Rust before calling the capture slice complete. Keep tests focused on geometry, image output, ownership, and real regressions. Compile platform apps on their target OS. Do not report capture/focus/permissions/clipboard/drag behavior as passing based only on compilation or a mockup. Record any unavailable manual checks plainly.
+
+Use workspace-local tooling where practical. Do not change user profiles, global PATH, unrelated software, or system settings to build this project. Do not capture the desktop as part of an automated smoke test; use a synthetic fixture. Native capture is user-initiated or explicitly requested for testing.
+
+## Microsoft WinUI guidance
+
+The user requested parsing Microsoft's WinUI plugin. Its pinned source, skill map, and application review are in `docs/winui-skill-review.md`. Before substantive Windows UI changes, read the relevant linked WinUI design/development/review skill and references; a local read-only copy is under `.tools/winui-reference` when present. Follow compatible platform guidance for DPI, native controls, theme resources, accessibility, and meaningful UI verification. Preserve the working local prototype while planning packaging or toolchain changes explicitly.

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <AssemblyName>Ovi.Screenshot</AssemblyName>
+    <RootNamespace>Ovi.Screenshot</RootNamespace>
+    <Version>0.1.0-preview.1</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Product>Ovi Screenshot</Product>
+    <Title>Ovi Screenshot</Title>
+    <Description>Native screenshots and area recording for Windows.</Description>
+    <ApplicationIcon>Assets\Ovi.Screenshot.ico</ApplicationIcon>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer" Version="0.7.1" PrivateAssets="all" />
+    <Compile Remove="Smoke\**" />
+    <Compile Remove="RecordingSmoke\**" />
+  </ItemGroup>
+  <Target Name="CopyRustCore" AfterTargets="Build">
+    <PropertyGroup>
+      <RustCorePath Condition="'$(RustCorePath)' == ''">$(MSBuildThisFileDirectory)..\..\target\debug\ovi_core.dll</RustCorePath>
+    </PropertyGroup>
+    <Copy SourceFiles="$(RustCorePath)" DestinationFolder="$(OutDir)" Condition="Exists('$(RustCorePath)')" />
+  </Target>
+</Project>

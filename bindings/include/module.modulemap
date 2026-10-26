@@ -1,0 +1,4 @@
+module OviCore {
+    header "ovi_core.h"
+    export *
+}
