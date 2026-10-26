@@ -6,7 +6,7 @@ The shared workflow is confirmed; dimensions below are proposed starting values 
 
 ## Tray and recording workflow
 
-The current preview uses a minimal tray-first experience. Single left click on the capture-frame notification icon opens the shared selector with Screenshot and Video modes. Right click offers Capture area, Record area or Stop recording, Reopen Last Preview, Settings, and Quit. Ordinary startup stays in the tray; settings opens on request or when a startup problem needs attention.
+The current preview uses a minimal tray-first experience. Single left click on the capture-frame notification icon opens the shared selector with Screenshot and Video actions. Right click offers Capture area, Record area or Stop recording, Reopen Last Preview, Settings, and Quit. Ordinary startup stays in the tray; settings opens on request or when a startup problem needs attention.
 
 The right-click menu is a native WinUI MenuFlyout and follows the system app theme, including dark mode. A dedicated loaded anchor keeps settings hidden. Settings > Set key detects the physical screenshot key or combination, including Mac keyboard modifiers. Some Mac-layout screenshot buttons send Shift+Win+3. Handle that selected macro directly if Windows rejects its registration because of the taskbar shortcut. Learning pauses the app's existing capture hotkey and selects one chord only while settings is foreground. Accept release-only special keys and modifiers already held at setup. After a chord is selected, allow a brief release interval even if focus changes; never select new keys in another app. Escape, idle focus loss, or timeout ends setup with useful feedback.
 
@@ -16,7 +16,7 @@ Successful screenshots play a short, quiet capture tick asynchronously. Cancella
 
 The preview also exposes a hover/focus-only Delete icon. Delete removes that capture's automatically saved file and its internal backing payload immediately, without confirmation or a success delay; Reopen Last Preview cannot restore it. Independent Save As, copy and drag exports remain. Disable deletion during an active preview operation, and keep it retriable if deletion fails. Escape and Close continue to dismiss rather than delete.
 
-Screenshots and video use the same selector and mode toolbar, including Space to pick a window. Show Screenshot and Video choices immediately; video mode also offers FPS, system sound and microphone switches and device choices. Keep a completed area outlined and movable. Capture or Record is enabled once an area or window is selected. Record saves the selected preferences and starts a 3–2–1 countdown centered in the selection and clamped to the work area. Escape or Cancel dismisses the selector, toolbar or countdown. Remove transient UI before acquiring recording frames.
+Screenshots and video use the same selector and toolbar, including Space to pick a window. Show separate screenshot and video actions immediately, with FPS and audio controls in a settings submenu. Keep a completed area outlined, movable and resizable using its edges and corners. Screenshot is available once an area or window is selected; video area selection must fit on one monitor. Record saves the selected preferences and starts a 3–2–1 countdown centered in the selection and clamped to the work area. Escape or Cancel dismisses the selector, toolbar or countdown. Remove transient UI before acquiring recording frames.
 
 A small rounded WinUI panel shows elapsed recorded time, Pause/Resume, and Stop using native theme resources and accessible icon controls. Pausing freezes the displayed time and omits that interval, including audio, from the saved MP4. Resume continues the same file using current screen content. Stop works while paused, finalizes and automatically saves the MP4, and shows its floating preview. If automatic save fails, keep the recording recoverable and offer manual Save/Discard. Recording is SDR.
 
@@ -42,7 +42,7 @@ For area/display capture, acquire a frozen source image before showing capture c
 
 The current native Cancel button uses compact rounded theme-aware styling, Segoe UI typography, and a quiet Esc hint. Keep its standard button accessibility and keyboard behavior; do not fall back to the unstyled classic button appearance when optimizing the overlay.
 
-Drag-release defines an area. The user may move it, switch capture mode, and confirm with Capture or Record on the toolbar. The planning mockup's Preview Capture button only navigates the demonstration.
+Drag-release defines an area. The user may move or resize it, then use the screenshot or video action on the toolbar. The planning mockup's Preview Capture button only navigates the demonstration.
 
 Disable the selection window's own opening transition and prepare its backing bitmap before revealing it. Still capture uses a one-shot native GDI read; the Win32 overlay consumes its BGRA pixels directly and repaints only selection marks as the pointer moves. Hide previews just before acquisition and synchronize with the compositor only if app surfaces were visible. Do not depend on capture exclusion across GDI drivers or add an arbitrary capture-start delay. Recording continues to use Windows.Graphics.Capture.
 

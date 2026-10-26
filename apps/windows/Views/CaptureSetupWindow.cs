@@ -17,36 +17,34 @@ namespace Ovi.Screenshot.Views;
 internal sealed class CaptureSetupWindow : Window
 {
     private readonly TaskCompletionSource _loaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly RadioButton _screenshotMode = new() { Content = "Screenshot", VerticalAlignment = VerticalAlignment.Center };
-    private readonly RadioButton _videoModeButton = new() { Content = "Video", VerticalAlignment = VerticalAlignment.Center };
-    private readonly ComboBox _fps = new() { Width = 104, VerticalAlignment = VerticalAlignment.Center };
-    private readonly ToggleButton _system = new() { Content = "System", MinWidth = 78, VerticalAlignment = VerticalAlignment.Center };
-    private readonly ToggleButton _microphone = new() { Content = "Mic", MinWidth = 60, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Button _screenshot = new() { Content = new FontIcon { Glyph = "\uE722", FontSize = 16 }, Width = 40, Height = 40, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly Button _video = new() { Content = new FontIcon { Glyph = "\uE714", FontSize = 16 }, Width = 40, Height = 40, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly ComboBox _fps = new() { Header = "Frame rate", MinWidth = 240, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ToggleSwitch _system = new() { Header = "System sound" };
+    private readonly ToggleSwitch _microphone = new() { Header = "Microphone" };
     private readonly ComboBox _outputDevice = new() { Header = "System sound device", MinWidth = 240 };
     private readonly ComboBox _microphoneDevice = new() { Header = "Microphone device", MinWidth = 240 };
-    private readonly Button _record = new() { Content = "Record", MinWidth = 80, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _devicesButton;
     private readonly nint _handle;
     private readonly Win32.Rect _workArea;
     private readonly double _scale;
     private readonly int _margin;
     private nint _selector;
-    private bool _started, _closed, _selectionMode, _closingSafely, _actionTaken, _keyboardFocusPending, _hadSelectionForeground, _isVideo;
+    private bool _started, _closed, _selectionMode, _closingSafely, _actionTaken, _keyboardFocusPending, _hadSelectionForeground;
+    private bool _canCapture, _canRecord, _videoAvailable = true;
     internal nint Handle => _handle;
     internal bool IsClosed => _closed;
 
     internal event Action<RecordingOptions>? RecordRequested;
     internal event Action? ScreenshotRequested;
-    internal event Action<bool>? VideoModeChanged;
     internal event Action? CancelRequested;
     internal event Action? FocusSelectionRequested;
 
     internal CaptureSetupWindow(Win32.Rect selectionBounds, Win32.Rect workArea,
-        RecordingOptions initial, AudioDeviceCatalog devices, bool initialVideo = true)
+        RecordingOptions initial, AudioDeviceCatalog devices)
     {
         initial.Validate();
         ArgumentNullException.ThrowIfNull(devices);
-        _isVideo = initialVideo;
         _workArea = workArea;
         Title = "Capture setup";
         nint window = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -76,35 +74,53 @@ internal sealed class CaptureSetupWindow : Window
             </Border>
             """);
         var actions = (StackPanel)surface.FindName("Actions");
-        string modeGroup = $"CaptureMode_{Guid.NewGuid():N}";
-        _screenshotMode.GroupName = _videoModeButton.GroupName = modeGroup;
-        _screenshotMode.IsChecked = !initialVideo;
-        _videoModeButton.IsChecked = initialVideo;
-        _screenshotMode.Checked += (_, _) => SetMode(false);
-        _videoModeButton.Checked += (_, _) => SetMode(true);
         foreach (int fps in new[] { 15, 24, 30, 60 })
         {
             var item = new ComboBoxItem { Content = $"{fps} fps", Tag = fps };
             _fps.Items.Add(item);
             if (fps == initial.FramesPerSecond) _fps.SelectedItem = item;
         }
-        _system.IsChecked = initial.SystemAudio;
-        _microphone.IsChecked = initial.Microphone;
+        _system.IsOn = initial.SystemAudio;
+        _microphone.IsOn = initial.Microphone;
         PopulateDevices(_outputDevice, devices.Outputs, initial.OutputDeviceId);
         PopulateDevices(_microphoneDevice, devices.Microphones, initial.MicrophoneDeviceId);
 
-        var deviceOptions = new StackPanel { Spacing = 12, Padding = new Thickness(4) };
-        deviceOptions.Children.Add(_outputDevice);
-        deviceOptions.Children.Add(_microphoneDevice);
+        var deviceOptions = new StackPanel { Spacing = 8, Padding = new Thickness(4) };
+        deviceOptions.Children.Add(_fps);
+        deviceOptions.Children.Add(_system); deviceOptions.Children.Add(_outputDevice);
+        deviceOptions.Children.Add(_microphone); deviceOptions.Children.Add(_microphoneDevice);
+        _system.Toggled += (_, _) => UpdateAudioDevices();
+        _microphone.Toggled += (_, _) => UpdateAudioDevices();
+        UpdateAudioDevices();
+        double initialScale = Math.Max(1, Win32.GetDpiForWindow(window) / 96d);
+        var optionsScroll = new ScrollViewer
+        {
+            Content = deviceOptions,
+            MaxHeight = Math.Max(32, Math.Min(520, workArea.Height / initialScale - 64)),
+            MaxWidth = Math.Max(64, Math.Min(340, workArea.Width / initialScale - 32)),
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollMode = ScrollMode.Enabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollMode = ScrollMode.Enabled
+        };
         var settings = new Button
         {
             Content = new FontIcon { Glyph = "\uE713", FontSize = 15 },
             Style = (Style)Application.Current.Resources["SubtleButtonStyle"],
             Width = 36, Height = 36, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
-            Flyout = new Flyout { Content = deviceOptions }
+            Flyout = new Flyout { Content = optionsScroll }
+        };
+        deviceOptions.PreviewKeyDown += (_, args) =>
+        {
+            if (args.Key == VirtualKey.F6)
+            {
+                args.Handled = true;
+                settings.Flyout?.Hide();
+                FocusSelectionRequested?.Invoke();
+            }
         };
         _devicesButton = settings;
-        _record.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+        _screenshot.Style = _video.Style = (Style)Application.Current.Resources["SubtleButtonStyle"];
         var cancel = new Button
         {
             Content = new FontIcon { Glyph = "\uE8BB", FontSize = 13 },
@@ -112,28 +128,27 @@ internal sealed class CaptureSetupWindow : Window
             Width = 36, Height = 36, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center
         };
         Identify(_fps, "RecordingSetupFrameRate", "Recording frame rate");
-        Identify(_screenshotMode, "CaptureModeScreenshot", "Screenshot mode");
-        Identify(_videoModeButton, "CaptureModeVideo", "Video mode");
-        AutomationProperties.SetHelpText(_screenshotMode, "Press F6 to return to the capture selection.");
+        Identify(_screenshot, "CaptureScreenshot", "Capture screenshot");
+        Identify(_video, "CaptureVideo", "Record video");
+        AutomationProperties.SetHelpText(_screenshot, "Press F6 to return to the capture selection.");
         AutomationProperties.SetHelpText(_fps, "Press F6 to return to the capture selection.");
         Identify(_system, "RecordingSetupSystemAudio", "Record system sound");
         Identify(_microphone, "RecordingSetupMicrophone", "Record microphone");
         Identify(_outputDevice, "RecordingSetupOutputDevice", "System sound output device");
         Identify(_microphoneDevice, "RecordingSetupMicrophoneDevice", "Microphone device");
-        Identify(settings, "RecordingSetupDevices", "Choose audio devices");
-        Identify(_record, "StartRecording", "Start recording");
-        Identify(cancel, "CancelRecordingSetup", "Cancel recording");
-        ToolTipService.SetToolTip(_system, "Record system sound");
-        ToolTipService.SetToolTip(_microphone, "Record microphone");
-        ToolTipService.SetToolTip(_fps, "Frame rate (F6 returns to selection)");
-        ToolTipService.SetToolTip(settings, "Audio devices");
+        Identify(settings, "RecordingSetupDevices", "Recording settings");
+        Identify(cancel, "CancelRecordingSetup", "Cancel capture");
+        ToolTipService.SetToolTip(_screenshot, "Capture screenshot");
+        ToolTipService.SetToolTip(_video, "Record video");
+        ToolTipService.SetToolTip(_fps, "Frame rate");
+        ToolTipService.SetToolTip(settings, "Recording settings");
         ToolTipService.SetToolTip(cancel, "Cancel (Esc)");
-        _record.Click += (_, _) => Confirm();
+        _screenshot.Click += (_, _) => CaptureScreenshot();
+        _video.Click += (_, _) => StartRecording();
         cancel.Click += (_, _) => Cancel();
-        actions.Children.Add(_screenshotMode); actions.Children.Add(_videoModeButton);
-        actions.Children.Add(_fps); actions.Children.Add(_system); actions.Children.Add(_microphone);
-        actions.Children.Add(settings); actions.Children.Add(_record); actions.Children.Add(cancel);
-        UpdateModeControls();
+        actions.Children.Add(_screenshot); actions.Children.Add(_video);
+        actions.Children.Add(settings); actions.Children.Add(cancel);
+        UpdateActionAvailability();
         surface.PreviewKeyDown += (_, args) =>
         {
             if (args.Key == VirtualKey.Escape) { args.Handled = true; Cancel(); }
@@ -142,7 +157,7 @@ internal sealed class CaptureSetupWindow : Window
         surface.Loaded += (_, _) =>
         {
             _loaded.TrySetResult();
-            if (_keyboardFocusPending) { _keyboardFocusPending = false; _screenshotMode.Focus(FocusState.Keyboard); }
+            if (_keyboardFocusPending) { _keyboardFocusPending = false; KeyboardTarget().Focus(FocusState.Keyboard); }
         };
         Content = surface;
 
@@ -150,7 +165,7 @@ internal sealed class CaptureSetupWindow : Window
         double scale = Math.Max(1, Win32.GetDpiForWindow(window) / 96d);
         int margin = Math.Min((int)Math.Round(12 * scale), Math.Max(0, Math.Min(workArea.Width, workArea.Height) / 4));
         _scale = scale; _margin = margin;
-        int width = ModeWidth(initialVideo);
+        int width = ToolbarWidth();
         int height = Math.Min((int)Math.Round(56 * scale), Math.Max(1, workArea.Height - 2 * margin));
         long centerX = ((long)selectionBounds.Left + selectionBounds.Right) / 2;
         long below = (long)selectionBounds.Bottom + margin;
@@ -197,25 +212,32 @@ internal sealed class CaptureSetupWindow : Window
         if (_started || _closed) throw new InvalidOperationException("Recording setup can only be shown once.");
         _started = true;
         _selectionMode = true;
-        _record.IsEnabled = false;
+        _canCapture = _canRecord = false;
+        UpdateActionAvailability();
         ObserveSelectionForeground();
         AppWindow.Show(false);
         DispatcherQueue.TryEnqueue(ObserveSelectionForeground);
     }
 
-    internal void SetCanCapture(bool canRecord)
+    internal void SetCanCapture(bool canCapture)
     {
-        if (!_closed && !_closingSafely && !_actionTaken) _record.IsEnabled = canRecord;
+        if (_closed || _closingSafely) return;
+        _canCapture = canCapture;
+        UpdateActionAvailability();
+    }
+
+    internal void SetCanRecord(bool canRecord)
+    {
+        if (_closed || _closingSafely) return;
+        _canRecord = canRecord;
+        UpdateActionAvailability();
     }
 
     internal void SetVideoAvailable(bool available)
     {
         if (_closed || _closingSafely) return;
-        _videoModeButton.IsEnabled = available;
-        string hint = available ? "Record a video" : "Save or discard the previous recording first";
-        ToolTipService.SetToolTip(_videoModeButton, hint);
-        AutomationProperties.SetHelpText(_videoModeButton, hint);
-        if (!available && _isVideo) _screenshotMode.IsChecked = true;
+        _videoAvailable = available;
+        UpdateActionAvailability();
     }
 
     internal void SetDevices(AudioDeviceCatalog devices)
@@ -232,7 +254,7 @@ internal sealed class CaptureSetupWindow : Window
     {
         if (_closed || _closingSafely || _actionTaken || !_selectionMode) return;
         Activate();
-        if (_screenshotMode.IsLoaded) _screenshotMode.Focus(FocusState.Keyboard);
+        if (_devicesButton.IsLoaded) KeyboardTarget().Focus(FocusState.Keyboard);
         else _keyboardFocusPending = true;
     }
 
@@ -286,56 +308,49 @@ internal sealed class CaptureSetupWindow : Window
     [DllImport("user32.dll")]
     private static extern nint GetAncestor(nint hwnd, uint flags);
 
-    private void Confirm()
+    private Button KeyboardTarget() => _screenshot.IsEnabled ? _screenshot : _devicesButton;
+
+    private void CaptureScreenshot()
     {
-        if (!_record.IsEnabled || _actionTaken) return;
-        if (!_isVideo)
-        {
-            _actionTaken = true;
-            ScreenshotRequested?.Invoke();
-            return;
-        }
+        if (_closed || _closingSafely || !_screenshot.IsEnabled || _actionTaken) return;
+        _actionTaken = true;
+        try { ScreenshotRequested?.Invoke(); }
+        finally { if (!_closed && !_closingSafely) _actionTaken = false; }
+    }
+
+    private void StartRecording()
+    {
+        if (_closed || _closingSafely || !_video.IsEnabled || _actionTaken) return;
         var options = new RecordingOptions((int)((ComboBoxItem)_fps.SelectedItem).Tag,
-            _system.IsChecked == true, _microphone.IsChecked == true,
+            _system.IsOn, _microphone.IsOn,
             ((AudioDeviceChoice)((ComboBoxItem)_outputDevice.SelectedItem).Tag).Id,
             ((AudioDeviceChoice)((ComboBoxItem)_microphoneDevice.SelectedItem).Tag).Id);
         options.Validate();
         if (_selectionMode)
         {
             _actionTaken = true;
-            RecordRequested?.Invoke(options);
+            try { RecordRequested?.Invoke(options); }
+            finally { if (!_closed && !_closingSafely) _actionTaken = false; }
         }
     }
 
-    private void SetMode(bool video)
-    {
-        if (_isVideo == video) return;
-        _isVideo = video;
-        UpdateModeControls();
-        ResizeForMode();
-        VideoModeChanged?.Invoke(video);
-    }
-
-    private int ModeWidth(bool video) => Math.Min((int)Math.Round((video ? 700 : 420) * _scale),
+    private int ToolbarWidth() => Math.Min((int)Math.Round(200 * _scale),
         Math.Max(1, _workArea.Width - 2 * _margin));
 
-    private void ResizeForMode()
+    private void UpdateActionAvailability()
     {
-        if (_closed || _closingSafely) return;
-        var position = AppWindow.Position;
-        var size = AppWindow.Size;
-        int width = ModeWidth(_isVideo);
-        long center = (long)position.X + size.Width / 2;
-        int left = (int)Math.Clamp(center - width / 2, (long)_workArea.Left + _margin, (long)_workArea.Right - width - _margin);
-        AppWindow.MoveAndResize(new RectInt32(left, position.Y, width, size.Height));
+        _screenshot.IsEnabled = _canCapture;
+        _video.IsEnabled = _videoAvailable && _canRecord;
+        string hint = !_videoAvailable ? "Save or discard the previous recording first"
+            : !_canRecord ? "Select an area on one display to record" : "Record video";
+        ToolTipService.SetToolTip(_video, hint);
+        AutomationProperties.SetHelpText(_video, hint);
     }
 
-    private void UpdateModeControls()
+    private void UpdateAudioDevices()
     {
-        var visibility = _isVideo ? Visibility.Visible : Visibility.Collapsed;
-        _fps.Visibility = _system.Visibility = _microphone.Visibility = _devicesButton.Visibility = visibility;
-        _record.Content = _isVideo ? "Record" : "Capture";
-        AutomationProperties.SetName(_record, _isVideo ? "Start recording" : "Capture screenshot");
+        _outputDevice.Visibility = _system.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        _microphoneDevice.Visibility = _microphone.IsOn ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static void PopulateDevices(ComboBox combo, IReadOnlyList<AudioDeviceChoice> devices, string? selectedId)
@@ -364,7 +379,7 @@ internal sealed class CaptureSetupWindow : Window
 
     // Only generated choices and our own window are used by this fixture.
     internal static async Task VerifySyntheticAsync(Win32.Rect workArea, Func<FrameworkElement, Task>? render = null,
-        Func<FrameworkElement, Task>? renderScreenshot = null)
+        Func<FrameworkElement, Task>? renderSettings = null)
     {
         var selection = new Win32.Rect { Left = workArea.Left + 30, Top = workArea.Top + 30,
             Right = workArea.Left + 230, Bottom = workArea.Top + 130 };
@@ -383,17 +398,15 @@ internal sealed class CaptureSetupWindow : Window
             nint ownerHandle = WinRT.Interop.WindowNative.GetWindowHandle(owner);
             var live = new CaptureSetupWindow(selection, workArea, initial, devices);
             int starts = 0, cancels = 0;
-            var modes = new List<bool>();
             RecordingOptions? chosen = null;
             live.RecordRequested += options => { starts++; chosen = options; };
             live.CancelRequested += () => cancels++;
-            live.VideoModeChanged += modes.Add;
             live.AttachOwner(ownerHandle);
             nint foreground = Win32.GetForegroundWindow();
             live.ShowForSelection();
             await live._loaded.Task.WaitAsync(TimeSpan.FromSeconds(3));
             await Task.Delay(60);
-            RequireNormalWidthFits(live, "video");
+            RequireNormalWidthFits(live);
             var position = live.AppWindow.Position;
             var size = live.AppWindow.Size;
             Require(position.X >= workArea.Left && position.Y >= workArea.Top &&
@@ -404,66 +417,64 @@ internal sealed class CaptureSetupWindow : Window
             Require(Win32.GetWindowLongPtr(live._handle, -8) == ownerHandle,
                 "the toolbar lost its selection owner");
             Require(Win32.GetForegroundWindow() == foreground, "showing the toolbar took initial focus from the selector");
-            if (render is not null) await render((FrameworkElement)live.Content);
             live.ActivateForKeyboard();
             await Task.Delay(50);
             live._devicesButton.Flyout!.ShowAt(live._devicesButton);
             await Task.Delay(75);
             live.CancelIfFocusLeftSelection();
             Require(cancels == 0 && owner.AppWindow.IsVisible, "the audio devices flyout cancelled selection");
+            if (renderSettings is not null) await renderSettings((FrameworkElement)((Flyout)live._devicesButton.Flyout).Content);
             live._devicesButton.Flyout!.Hide();
             owner.Activate();
             await Task.Delay(50);
             live.RaiseWithoutActivation();
             Require(cancels == 0 && !live._closed, "returning focus to the selector cancelled recording setup");
-            live.Confirm();
-            Require(starts == 0 && !live._record.IsEnabled, "Record became available before choosing an area");
-            live._screenshotMode.IsChecked = true;
-            await Task.Delay(60);
-            Require(modes.SequenceEqual([false]) && live._fps.Visibility == Visibility.Collapsed &&
-                (string)live._record.Content == "Capture", "Screenshot mode did not hide video settings and offer Capture");
-            RequireNormalWidthFits(live, "screenshot after switching");
-            live._videoModeButton.IsChecked = true;
-            await Task.Delay(60);
-            Require(modes.SequenceEqual([false, true]) && live._fps.Visibility == Visibility.Visible &&
-                (string)live._record.Content == "Record", "Video mode did not restore recording settings");
-            RequireNormalWidthFits(live, "video after switching");
+            live.CaptureScreenshot();
+            live.StartRecording();
+            Require(starts == 0 && !live._screenshot.IsEnabled && !live._video.IsEnabled,
+                "capture actions became available before choosing an area");
             live.SetCanCapture(true);
+            live.SetCanRecord(false);
+            Require(live._screenshot.IsEnabled && !live._video.IsEnabled &&
+                AutomationProperties.GetHelpText(live._video).Contains("one display"),
+                "video availability did not explain the single-display requirement");
+            live.SetVideoAvailable(false);
+            live.SetCanRecord(true);
+            Require(!live._video.IsEnabled && AutomationProperties.GetHelpText(live._video).Contains("previous recording"),
+                "pending recording did not disable video with an explanation");
+            live.SetVideoAvailable(true);
+            Require(live._video.IsEnabled, "video action did not return after pending work was resolved");
+            if (render is not null) await render((FrameworkElement)live.Content);
             live._fps.SelectedIndex = 3;
-            live._system.IsChecked = true;
+            live._system.IsOn = true;
             live._outputDevice.SelectedIndex = 1;
             live.SetDevices(new([], []));
-            Require(SelectedDevice(live._outputDevice) == "fixture-output" && live._system.IsChecked == true &&
+            Require(SelectedDevice(live._outputDevice) == "fixture-output" && live._system.IsOn &&
                 SelectedDevice(live._microphoneDevice) == "fixture-mic" && (int)((ComboBoxItem)live._fps.SelectedItem).Tag == 60,
                 "refreshing devices replaced the user's draft choices");
-            live.Confirm();
+            live.StartRecording();
             Require(starts == 1 && chosen == (initial with { FramesPerSecond = 60, SystemAudio = true, OutputDeviceId = "fixture-output" }),
                 "Record did not publish selected options");
             live.CloseSafely();
             Require(live._closed && cancels == 0, "a programmatic close emitted cancellation");
 
-            var still = new CaptureSetupWindow(selection, workArea, initial, devices, initialVideo: false);
+            var still = new CaptureSetupWindow(selection, workArea, initial, devices);
             int screenshots = 0, accidentalRecords = 0;
-            still.ScreenshotRequested += () => screenshots++;
+            still.ScreenshotRequested += () => { screenshots++; still.CloseSafely(); };
             still.RecordRequested += _ => accidentalRecords++;
             still.AttachOwner(ownerHandle);
             still.ShowForSelection();
             await still._loaded.Task.WaitAsync(TimeSpan.FromSeconds(3));
             await Task.Delay(60);
-            RequireNormalWidthFits(still, "initial screenshot");
-            Require(still._fps.Visibility == Visibility.Collapsed && (string)still._record.Content == "Capture",
-                "Screenshot mode did not initialize as a compact capture toolbar");
-            still.SetVideoAvailable(false);
-            Require(!still._videoModeButton.IsEnabled && still._screenshotMode.IsEnabled,
-                "A pending recording did not leave screenshot mode available");
-            still.SetVideoAvailable(true);
-            Require(still._videoModeButton.IsEnabled, "Video mode did not return after pending work was resolved");
-            still.Confirm();
-            Require(screenshots == 0 && !still._record.IsEnabled,
-                "Capture became available before choosing an area");
-            if (renderScreenshot is not null) await renderScreenshot((FrameworkElement)still.Content);
+            RequireNormalWidthFits(still);
+            Require(still.AppWindow.Size.Width == size.Width && still._devicesButton.Visibility == Visibility.Visible,
+                "capture toolbar layout changed");
             still.SetCanCapture(true);
-            still.Confirm(); still.Confirm();
+            still.SetCanRecord(true);
+            still.SetVideoAvailable(false);
+            Require(still._screenshot.IsEnabled && !still._video.IsEnabled,
+                "a pending recording prevented screenshot capture");
+            still.CaptureScreenshot(); still.CaptureScreenshot();
             Require(screenshots == 1 && accidentalRecords == 0, "Capture did not request exactly one screenshot");
             still.CloseSafely();
 
@@ -513,15 +524,15 @@ internal sealed class CaptureSetupWindow : Window
             if (!condition) throw new InvalidOperationException($"Recording setup regression: {scenario}.");
         }
 
-        static void RequireNormalWidthFits(CaptureSetupWindow toolbar, string mode)
+        static void RequireNormalWidthFits(CaptureSetupWindow toolbar)
         {
-            int idealWidth = (int)Math.Round((toolbar._isVideo ? 700 : 420) * toolbar._scale);
+            int idealWidth = (int)Math.Round(200 * toolbar._scale);
             if (toolbar._workArea.Width - 2 * toolbar._margin < idealWidth) return;
             var surface = (Border)toolbar.Content;
             surface.UpdateLayout();
             var scroll = (ScrollViewer)surface.Child;
             Require(scroll.ViewportWidth > 0 && scroll.ExtentWidth <= scroll.ViewportWidth + 1,
-                $"{mode} controls overflow: extent {scroll.ExtentWidth:F1}, viewport {scroll.ViewportWidth:F1}");
+                $"Toolbar controls overflow: extent {scroll.ExtentWidth:F1}, viewport {scroll.ViewportWidth:F1}");
         }
     }
 }

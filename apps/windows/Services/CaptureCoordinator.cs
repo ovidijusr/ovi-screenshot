@@ -69,7 +69,7 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
             bool selectedVideo = recordVideo;
             if (!selected.IsCompleted)
             {
-                var toolbar = ShowCaptureToolbar(selection, initialMonitor.WorkArea, initial, recordVideo,
+                var toolbar = ShowCaptureToolbar(selection, initialMonitor.WorkArea, initial,
                     video => selectedVideo = video, chosen => options = chosen);
                 _ = RefreshToolbarDevicesAsync(toolbar, audioDevices, selected);
             }
@@ -187,28 +187,37 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
     }
 
     private CaptureSetupWindow ShowCaptureToolbar(SelectionWindow selection, Win32.Rect workArea,
-        RecordingOptions initial, bool initialVideo, Action<bool> modeChanged, Action<RecordingOptions> choose)
+        RecordingOptions initial, Action<bool> modeChanged, Action<RecordingOptions> choose)
     {
         var placement = new Win32.Rect { Left = workArea.Left, Right = workArea.Right, Top = workArea.Top, Bottom = workArea.Top };
-        var toolbar = new CaptureSetupWindow(placement, workArea, initial, new AudioDeviceCatalog([], []), initialVideo: initialVideo);
+        var toolbar = new CaptureSetupWindow(placement, workArea, initial, new AudioDeviceCatalog([], []));
         _captureSetup = toolbar;
         toolbar.AttachOwner(selection.Handle);
         selection.SetToolbarHandle(toolbar.Handle);
-        selection.SelectionChanged += toolbar.SetCanCapture;
+        void UpdateActions(bool ready)
+        {
+            toolbar.SetCanCapture(ready);
+            toolbar.SetCanRecord(ready && selection.CanRecordSelection);
+        }
+        selection.SelectionChanged += UpdateActions;
         selection.Activated += toolbar.RaiseWithoutActivation;
         selection.ToolbarRequested += toolbar.ActivateForKeyboard;
         selection.Closing += toolbar.CloseSafely;
         toolbar.FocusSelectionRequested += selection.FocusSelection;
-        toolbar.VideoModeChanged += video => { selection.SetVideoMode(video); modeChanged(video); };
         toolbar.ScreenshotRequested += () =>
         {
             if (!selection.HasSelection) return;
+            selection.SetVideoMode(false);
+            modeChanged(false);
             toolbar.CloseSafely();
             selection.ConfirmSelection();
         };
         toolbar.RecordRequested += chosen =>
         {
+            if (!selection.HasSelection || !selection.CanRecordSelection) return;
+            selection.SetVideoMode(true);
             if (!selection.HasSelection) return;
+            modeChanged(true);
             choose(chosen);
             toolbar.CloseSafely();
             selection.ConfirmSelection();
@@ -216,7 +225,7 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
         toolbar.CancelRequested += () => { toolbar.CloseSafely(); selection.Cancel(); };
         toolbar.SetVideoAvailable(!recordings.HasPendingRecording);
         toolbar.ShowForSelection();
-        toolbar.SetCanCapture(selection.HasSelection);
+        UpdateActions(selection.HasSelection);
         return toolbar;
     }
 

@@ -89,8 +89,8 @@ Ovi Screenshot $Version - Windows 11 x64 preview
 Extract the entire ZIP to a writable folder, then run Ovi.Screenshot.exe.
 Keep all included files together. The app starts in the notification area.
 
-Click the tray icon or press Ctrl+Shift+4, then choose Screenshot or Video.
-Draw an area or press Space to choose a window, then Capture or Record.
+Click the tray icon or press Ctrl+Shift+4 to open the shared selector.
+Draw an area or press Space for a window, then choose Screenshot or Video.
 Escape cancels. Hover over a preview for Copy, Save, Delete and Close.
 Screenshots and recordings save to Pictures\Ovi Screenshot automatically.
 Delete removes that saved capture; independent saved/shared copies stay.

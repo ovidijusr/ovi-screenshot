@@ -45,6 +45,7 @@ internal sealed class SelectionWindow
     private bool _anchored, _dragging, _complete, _shown, _disposed, _selectionReady, _moving;
     private PixelSelection _moveStart;
     private int _moveOriginX, _moveOriginY;
+    private ResizeEdge _resizeEdges;
     private bool _windowMode;
     private bool _windowClickPending;
     private bool _closingNotified;
@@ -56,6 +57,8 @@ internal sealed class SelectionWindow
     internal bool IsVisible => _window != 0 && Native.IsWindowVisible(_window);
     internal nint Handle => _window;
     internal bool HasSelection => _selectionReady && !_dragging && !_windowClickPending && !_complete;
+    internal bool CanRecordSelection => HasSelection &&
+        (_windowMode ? SelectedWindow is not null : TryLimitForArea(CurrentSelection(), out _));
     internal event Action<bool>? SelectionChanged;
     internal event Action? Activated;
     internal event Action? ToolbarRequested;
@@ -194,8 +197,8 @@ internal sealed class SelectionWindow
     private bool TryLimitForArea(PixelSelection area, out Win32.Rect? limit)
     {
         limit = null;
-        if (AreaLimits is null) return true;
-        foreach (var monitor in AreaLimits)
+        if (_monitorLimits is null) return true;
+        foreach (var monitor in _monitorLimits)
         {
             if (TryLatchAreaLimit([monitor], _bounds, _capture.Width, _capture.Height, area.X, area.Y, out var candidate)
                 && candidate is { } bounds && (long)area.X + area.Width <= bounds.Right && (long)area.Y + area.Height <= bounds.Bottom)
@@ -257,6 +260,9 @@ internal sealed class SelectionWindow
                 break;
             case WindowMessage.EraseBackground: return 1; // WM_ERASEBKGND: backing pixels always cover the client area.
             case WindowMessage.Paint: Paint(); return 0;
+            case 0x0020: // WM_SETCURSOR
+                if (((long)lParam & 0xffff) == 1 && TrySetSelectionCursor()) return 1; // HTCLIENT
+                break;
             case WindowMessage.LeftButtonDown:
             {
                 var point = ReadPointer(lParam);
@@ -269,6 +275,16 @@ internal sealed class SelectionWindow
                     Native.SetFocus(_window); Native.SetCapture(_window); return 0;
                 }
                 var sourcePoint = ToSourcePoint(point.X, point.Y);
+                ResizeEdge edge = _confirmSelection && _selectionReady && MarkBounds() is { } selectedBounds
+                    ? HitTestResize(selectedBounds, point.X, point.Y, ResizeHitRadius()) : ResizeEdge.None;
+                if (edge != ResizeEdge.None)
+                {
+                    _resizeEdges = edge; _dragging = true;
+                    _moveStart = CurrentSelection();
+                    (_moveOriginX, _moveOriginY) = sourcePoint;
+                    NotifySelectionChanged();
+                    Native.SetFocus(_window); Native.SetCapture(_window); return 0;
+                }
                 if (_confirmSelection && _selectionReady && Contains(CurrentSelection(), sourcePoint.X, sourcePoint.Y))
                 {
                     _moving = _dragging = true;
@@ -307,15 +323,16 @@ internal sealed class SelectionWindow
                     return 0;
                 }
                 if (!_dragging) return 0;
-                bool wasMoving = _moving;
-                if (_moving) ChangeVisuals(() => MoveSelectedArea(point.X, point.Y));
+                bool wasAdjusting = _moving || _resizeEdges != ResizeEdge.None;
+                if (_resizeEdges != ResizeEdge.None) ChangeVisuals(() => ResizeSelectedArea(point.X, point.Y));
+                else if (_moving) ChangeVisuals(() => MoveSelectedArea(point.X, point.Y));
                 else ChangeVisuals(() => SetCurrent(point.X, point.Y));
                 ClearPointerCapture();
                 if (CurrentSelection() is { Width: > 0, Height: > 0 } area)
                 {
                     if (_confirmSelection) { ChangeVisuals(() => SetSelectionReady(true)); Announce(); }
                     else Finish(area);
-                    if (_confirmSelection && wasMoving) NotifySelectionChanged();
+                    if (_confirmSelection && wasAdjusting) NotifySelectionChanged();
                 }
                 else ChangeVisuals(ResetAreaAnchor);
                 return 0;
@@ -395,8 +412,10 @@ internal sealed class SelectionWindow
         {
             int dx = key == 0x25 ? -step : key == 0x27 ? step : 0;
             int dy = key == 0x26 ? -step : key == 0x28 ? step : 0;
-            ChangeVisuals(() => ApplyMovedArea(ClampMovedArea(CurrentSelection(), dx, dy,
-                _activeAreaLimit ?? new Win32.Rect { Right = _capture.Width, Bottom = _capture.Height })));
+            bool resize = (Native.GetKeyState(0x11) & 0x8000) != 0;
+            ChangeVisuals(() => ApplyMovedArea(resize
+                ? ResizeArea(CurrentSelection(), ResizeEdge.Right | ResizeEdge.Bottom, dx, dy, SelectionLimit())
+                : ClampMovedArea(CurrentSelection(), dx, dy, SelectionLimit())));
             Announce(); return;
         }
         ChangeVisuals(() =>
@@ -427,7 +446,7 @@ internal sealed class SelectionWindow
         var selection = CurrentSelection();
         bool inGap = !_anchored && !TryLatchAreaLimit(AreaLimits, _bounds, _capture.Width, _capture.Height, _currentX, _currentY, out _);
         Native.SetWindowText(_window, inGap ? "Move the selection cursor onto a display. Enter sets a corner. Escape cancels."
-            : _anchored ? $"Selected area {selection.Width} by {selection.Height} pixels. {(_confirmSelection ? _selectionReady ? _videoMode ? "Use Record to start." : "Use Capture to take a screenshot." : "Move and press Enter to select." : "Enter captures.")} Escape cancels."
+            : _anchored ? $"Selected area {selection.Width} by {selection.Height} pixels. {(_confirmSelection ? _selectionReady ? _videoMode ? "Drag edges to resize, or use Control and arrows. Use Record to start." : "Drag edges to resize, or use Control and arrows. Use Capture to take a screenshot." : "Move and press Enter to select." : "Enter captures.")} Escape cancels."
             : $"Selection cursor {_currentX}, {_currentY}. Enter sets a corner. Escape cancels.");
         Native.NotifyWinEvent(0x800C, _window, 0, 0);
     }
@@ -484,6 +503,78 @@ internal sealed class SelectionWindow
             _activeAreaLimit ?? new Win32.Rect { Right = _capture.Width, Bottom = _capture.Height }));
     }
 
+    private void ResizeSelectedArea(int x, int y)
+    {
+        var point = ToSourcePoint(x, y);
+        ApplyMovedArea(ResizeArea(_moveStart, _resizeEdges, point.X - _moveOriginX, point.Y - _moveOriginY, SelectionLimit()));
+    }
+
+    private Win32.Rect SelectionLimit() => _activeAreaLimit ?? new Win32.Rect { Right = _capture.Width, Bottom = _capture.Height };
+
+    [Flags]
+    private enum ResizeEdge
+    {
+        None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8,
+        TopLeft = Left | Top, TopRight = Right | Top, BottomLeft = Left | Bottom, BottomRight = Right | Bottom
+    }
+
+    private int ResizeHitRadius() => Math.Max(5, Dip(7));
+
+    private static ResizeEdge HitTestResize(Win32.Rect bounds, int x, int y, int radius)
+    {
+        if ((long)x < (long)bounds.Left - radius || (long)x > (long)bounds.Right + radius ||
+            (long)y < (long)bounds.Top - radius || (long)y > (long)bounds.Bottom + radius) return ResizeEdge.None;
+        // Small selections must retain a draggable interior. Resize them from
+        // just outside their edge or corner rather than covering that interior.
+        if (bounds.Width <= radius * 2 || bounds.Height <= radius * 2)
+            if (x >= bounds.Left && x < bounds.Right && y >= bounds.Top && y < bounds.Bottom) return ResizeEdge.None;
+        long left = Math.Abs((long)x - bounds.Left), right = Math.Abs((long)x - bounds.Right);
+        long top = Math.Abs((long)y - bounds.Top), bottom = Math.Abs((long)y - bounds.Bottom);
+        ResizeEdge edge = left <= radius && left <= right ? ResizeEdge.Left
+            : right <= radius ? ResizeEdge.Right : ResizeEdge.None;
+        edge |= top <= radius && top <= bottom ? ResizeEdge.Top
+            : bottom <= radius ? ResizeEdge.Bottom : ResizeEdge.None;
+        return edge;
+    }
+
+    private static PixelSelection ResizeArea(PixelSelection area, ResizeEdge edge, int dx, int dy, Win32.Rect limit)
+    {
+        int left = area.X, top = area.Y, right = checked(area.X + area.Width), bottom = checked(area.Y + area.Height);
+        if ((edge & ResizeEdge.Left) != 0) left = ResizeCoordinate((long)left + dx, right, limit.Left, limit.Right, preferLower: true);
+        else if ((edge & ResizeEdge.Right) != 0) right = ResizeCoordinate((long)right + dx, left, limit.Left, limit.Right, preferLower: false);
+        if ((edge & ResizeEdge.Top) != 0) top = ResizeCoordinate((long)top + dy, bottom, limit.Top, limit.Bottom, preferLower: true);
+        else if ((edge & ResizeEdge.Bottom) != 0) bottom = ResizeCoordinate((long)bottom + dy, top, limit.Top, limit.Bottom, preferLower: false);
+        return new PixelSelection(Math.Min(left, right), Math.Min(top, bottom), Math.Abs(right - left), Math.Abs(bottom - top));
+    }
+
+    private static int ResizeCoordinate(long value, int opposite, int minimum, int maximum, bool preferLower)
+    {
+        int coordinate = (int)Math.Clamp(value, minimum, maximum);
+        if (coordinate != opposite) return coordinate;
+        if (preferLower && opposite > minimum) return opposite - 1;
+        if (!preferLower && opposite < maximum) return opposite + 1;
+        return opposite > minimum ? opposite - 1 : opposite + 1;
+    }
+
+    private bool TrySetSelectionCursor()
+    {
+        if (!_confirmSelection || _windowMode || !_selectionReady || !Win32.GetCursorPos(out var cursor) || MarkBounds() is not { } bounds) return false;
+        var point = ScreenToViewport(_bounds, cursor);
+        ResizeEdge edge = _resizeEdges != ResizeEdge.None ? _resizeEdges : HitTestResize(bounds, point.X, point.Y, ResizeHitRadius());
+        int id = _moving ? 32646 : edge switch
+        {
+            ResizeEdge.Left or ResizeEdge.Right => 32644, // IDC_SIZEWE
+            ResizeEdge.Top or ResizeEdge.Bottom => 32645, // IDC_SIZENS
+            ResizeEdge.TopLeft or ResizeEdge.BottomRight => 32642, // IDC_SIZENWSE
+            ResizeEdge.TopRight or ResizeEdge.BottomLeft => 32643, // IDC_SIZENESW
+            _ => 0
+        };
+        if (id == 0 && Contains(CurrentSelection(), ToSourcePoint(point.X, point.Y).X, ToSourcePoint(point.X, point.Y).Y)) id = 32646; // IDC_SIZEALL
+        if (id == 0) return false;
+        Native.SetCursor(Native.LoadCursor(0, new nint(id)));
+        return true;
+    }
+
     private void ApplyMovedArea(PixelSelection area)
     {
         _anchorX = area.X; _anchorY = area.Y;
@@ -536,6 +627,7 @@ internal sealed class SelectionWindow
 
     private void MovePointer(int x, int y)
     {
+        if (_resizeEdges != ResizeEdge.None) { ChangeVisuals(() => ResizeSelectedArea(x, y)); return; }
         if (_moving) { ChangeVisuals(() => MoveSelectedArea(x, y)); return; }
         if (_confirmSelection && _selectionReady && !_windowMode && !_dragging) return;
         if (_windowMode && HitTestWindow(_windows, _bounds.Left + x, _bounds.Top + y) == _windowIndex)
@@ -568,6 +660,7 @@ internal sealed class SelectionWindow
     private void ClearPointerCapture()
     {
         _dragging = _windowClickPending = _moving = false;
+        _resizeEdges = ResizeEdge.None;
         _pressedWindow = null;
         if (_window != 0 && Native.GetCapture() == _window) Native.ReleaseCapture();
     }
@@ -768,6 +861,7 @@ internal sealed class SelectionWindow
             "moving clamps against the opposite monitor edges");
         Require(Contains(movable, 100, 700) && Contains(movable, 499, 999) && !Contains(movable, 500, 999),
             "only points inside the selected area start a move");
+        VerifySyntheticResizing();
         VerifySyntheticMoveLifecycle();
         VerifySyntheticModeSwitching();
 
@@ -776,6 +870,44 @@ internal sealed class SelectionWindow
         static void Require(bool condition, string scenario)
         {
             if (!condition) throw new InvalidOperationException("Multi-display selection regression: " + scenario + ".");
+        }
+    }
+
+    private static void VerifySyntheticResizing()
+    {
+        var area = new PixelSelection(100, 100, 200, 120);
+        var bounds = new Win32.Rect { Left = 100, Top = 100, Right = 300, Bottom = 220 };
+        var limit = new Win32.Rect { Left = 0, Top = 0, Right = 400, Bottom = 300 };
+        foreach (int radius in new[] { 7, 11, 14 }) // 100%, 150%, and 200% scaling.
+        {
+            Require(HitTestResize(bounds, 100, 100, radius) == ResizeEdge.TopLeft, "top-left handle");
+            Require(HitTestResize(bounds, 300, 100, radius) == ResizeEdge.TopRight, "top-right handle");
+            Require(HitTestResize(bounds, 100, 220, radius) == ResizeEdge.BottomLeft, "bottom-left handle");
+            Require(HitTestResize(bounds, 300, 220, radius) == ResizeEdge.BottomRight, "bottom-right handle");
+            Require(HitTestResize(bounds, 200, 100, radius) == ResizeEdge.Top, "top edge");
+            Require(HitTestResize(bounds, 200, 220, radius) == ResizeEdge.Bottom, "bottom edge");
+            Require(HitTestResize(bounds, 100, 160, radius) == ResizeEdge.Left, "left edge");
+            Require(HitTestResize(bounds, 300, 160, radius) == ResizeEdge.Right, "right edge");
+            Require(HitTestResize(bounds, 200, 160, radius) == ResizeEdge.None, "interior remains movable");
+            var tiny = new Win32.Rect { Left = 10, Top = 10, Right = 11, Bottom = 11 };
+            Require(HitTestResize(tiny, 10, 10, radius) == ResizeEdge.None &&
+                HitTestResize(tiny, 9, 9, radius) == ResizeEdge.TopLeft, "tiny selection can move and resize");
+        }
+        Require(ResizeArea(area, ResizeEdge.Left, 25, 0, limit) == new PixelSelection(125, 100, 175, 120), "left resize");
+        Require(ResizeArea(area, ResizeEdge.Right, 25, 0, limit) == new PixelSelection(100, 100, 225, 120), "right resize");
+        Require(ResizeArea(area, ResizeEdge.Top, 0, 25, limit) == new PixelSelection(100, 125, 200, 95), "top resize");
+        Require(ResizeArea(area, ResizeEdge.Bottom, 0, 25, limit) == new PixelSelection(100, 100, 200, 145), "bottom resize");
+        Require(ResizeArea(area, ResizeEdge.TopLeft, -200, -200, limit) == new PixelSelection(0, 0, 300, 220), "top-left monitor clamp");
+        Require(ResizeArea(area, ResizeEdge.TopRight, 200, -200, limit) == new PixelSelection(100, 0, 300, 220), "top-right monitor clamp");
+        Require(ResizeArea(area, ResizeEdge.BottomLeft, -200, 200, limit) == new PixelSelection(0, 100, 300, 200), "bottom-left monitor clamp");
+        Require(ResizeArea(area, ResizeEdge.BottomRight, 200, 200, limit) == new PixelSelection(100, 100, 300, 200), "bottom-right monitor clamp");
+        Require(ResizeArea(area, ResizeEdge.TopLeft, 240, 140, limit) == new PixelSelection(300, 220, 40, 20), "corners cross naturally");
+        Require(ResizeArea(area, ResizeEdge.Left, 200, 0, limit).Width == 1 &&
+            ResizeArea(area, ResizeEdge.Bottom, 0, -120, limit).Height == 1, "resize keeps at least one pixel");
+
+        static void Require(bool condition, string scenario)
+        {
+            if (!condition) throw new InvalidOperationException("Selection resize regression: " + scenario + ".");
         }
     }
 
@@ -815,6 +947,18 @@ internal sealed class SelectionWindow
             window.NotifySelectionChanged();
             if (!window.HasSelection || !changes[^1] || window.CurrentSelection() != new PixelSelection(220, 140, 100, 60))
                 throw new InvalidOperationException("Moving selection did not retain its dimensions and clamp to the display.");
+            window._moveStart = window.CurrentSelection();
+            window._moveOriginX = 320; window._moveOriginY = 200;
+            window._resizeEdges = ResizeEdge.BottomRight; window._dragging = true;
+            window.NotifySelectionChanged();
+            window.ResizeSelectedArea(280, 180);
+            window.ConfirmSelection();
+            if (window.HasSelection || window._complete || changes[^1] || window.CurrentSelection() != new PixelSelection(220, 140, 60, 40))
+                throw new InvalidOperationException("Resizing did not disable capture or update the selected area.");
+            window.ClearPointerCapture(); window.NotifySelectionChanged();
+            if (!window.HasSelection || !changes[^1])
+                throw new InvalidOperationException("Releasing a resize did not enable capture.");
+            window.ApplyMovedArea(new PixelSelection(220, 140, 100, 60));
             window.ConfirmSelection();
             if (!window._completion.Task.IsCompletedSuccessfully || window.CurrentSelection() != new PixelSelection(220, 140, 100, 60)
                 || closes != 1 || !aliveWhenClosing)
@@ -855,7 +999,7 @@ internal sealed class SelectionWindow
             if (!selector.TryAnchorCurrent()) throw new InvalidOperationException("Could not anchor screenshot selection.");
             selector.SetCurrent(200, 90);
             selector.SetSelectionReady(true);
-            if (!selector.HasSelection || selector.CurrentSelection().Width != 180)
+            if (!selector.HasSelection || selector.CanRecordSelection || selector.CurrentSelection().Width != 180)
                 throw new InvalidOperationException("Screenshot selection did not span both displays.");
             selector.SetVideoMode(true);
             if (selector.HasSelection || selector._anchored)
@@ -865,6 +1009,8 @@ internal sealed class SelectionWindow
             if (!selector.TryAnchorCurrent()) throw new InvalidOperationException("Could not re-anchor screenshot selection.");
             selector.SetCurrent(100, 90);
             selector.SetSelectionReady(true);
+            if (!selector.CanRecordSelection)
+                throw new InvalidOperationException("A single-display screenshot was not available for recording.");
             selector.SetVideoMode(true);
             if (!selector.HasSelection || selector._activeAreaLimit is not { Left: 0, Right: 160 } ||
                 selector.CurrentSelection() != new PixelSelection(20, 30, 80, 60))
@@ -889,11 +1035,28 @@ internal sealed class SelectionWindow
         {
             picker._windowMode = true; picker._windowIndex = 0;
             picker.ConfirmWindow();
+            if (!picker.CanRecordSelection)
+                throw new InvalidOperationException("A selected window was not available for recording in screenshot mode.");
             picker.SetVideoMode(true);
-            if (!picker.HasSelection || !ReferenceEquals(picker.SelectedWindow, target))
+            if (!picker.HasSelection || !picker.CanRecordSelection || !ReferenceEquals(picker.SelectedWindow, target))
                 throw new InvalidOperationException("Switching capture mode lost the selected native window.");
         }
         finally { picker.Cancel(); }
+
+        var unrestricted = new SelectionWindow(display, desktop, pixels, confirmSelection: true);
+        try
+        {
+            unrestricted.SetCurrent(20, 30);
+            if (!unrestricted.TryAnchorCurrent()) throw new InvalidOperationException("Could not anchor unrestricted selection.");
+            unrestricted.SetCurrent(200, 90);
+            unrestricted.SetSelectionReady(true);
+            if (!unrestricted.CanRecordSelection)
+                throw new InvalidOperationException("An unrestricted selection was unavailable for recording.");
+            unrestricted._dragging = true;
+            if (unrestricted.CanRecordSelection)
+                throw new InvalidOperationException("A changing selection was available for recording.");
+        }
+        finally { unrestricted.Cancel(); }
     }
     private PixelSelection CurrentSelection() => new(Math.Min(_anchorX, _currentX), Math.Min(_anchorY, _currentY), Math.Abs(_anchorX - _currentX), Math.Abs(_anchorY - _currentY));
     private int X(int source) => (int)Math.Round(source * (double)Width / _capture.Width);
@@ -917,10 +1080,11 @@ internal sealed class SelectionWindow
         if (MarkBounds() is not { } mark) return;
         int left = mark.Left, top = mark.Top, right = mark.Right, bottom = mark.Bottom;
         // Separate border strips preserve a complex dirty region; never repaint its whole interior.
-        Invalidate(left - 3, top - 3, right + 4, top + 4);
-        Invalidate(left - 3, bottom - 3, right + 4, bottom + 4);
-        Invalidate(left - 3, top, left + 4, bottom);
-        Invalidate(right - 3, top, right + 4, bottom);
+        int margin = _confirmSelection && _selectionReady && !_windowMode ? Math.Max(3, Dip(5)) : 3;
+        Invalidate(left - margin, top - margin, right + margin + 1, top + margin + 1);
+        Invalidate(left - margin, bottom - margin, right + margin + 1, bottom + margin + 1);
+        Invalidate(left - margin, top, left + margin + 1, bottom);
+        Invalidate(right - margin, top, right + margin + 1, bottom);
     }
 
     private void Invalidate(int left, int top, int right, int bottom)
@@ -970,12 +1134,31 @@ internal sealed class SelectionWindow
                     Native.MoveToEx(_buffer.Dc, x, y - 7, 0); Native.LineTo(_buffer.Dc, x, y + 8);
                 }
             }
+            if (_confirmSelection && _selectionReady && !_windowMode && MarkBounds() is { } selected)
+                DrawResizeHandles(_buffer.Dc, selected);
             if (_windows.Count > 0 && (dirty == 0 || Native.RectInRegion(dirty, in _modeHintBounds))) DrawModeHint();
         }
         finally { Native.RestoreDC(_buffer.Dc, saved); }
     }
 
     private int Dip(double value) => (int)Math.Round(value * _scale);
+
+    private void DrawResizeHandles(nint dc, Win32.Rect bounds)
+    {
+        int radius = Math.Max(2, Dip(3));
+        int centerX = (int)(((long)bounds.Left + bounds.Right) / 2);
+        int centerY = (int)(((long)bounds.Top + bounds.Bottom) / 2);
+        Native.SelectObject(dc, Native.GetStockObject(0)); // WHITE_BRUSH
+        Native.SelectObject(dc, _blackPen);
+        Draw(bounds.Left, bounds.Top); Draw(bounds.Right, bounds.Top);
+        Draw(bounds.Left, bounds.Bottom); Draw(bounds.Right, bounds.Bottom);
+        if (bounds.Width > radius * 4 && bounds.Height > radius * 4)
+        {
+            Draw(centerX, bounds.Top); Draw(centerX, bounds.Bottom);
+            Draw(bounds.Left, centerY); Draw(bounds.Right, centerY);
+        }
+        void Draw(int x, int y) => Native.Rectangle(dc, x - radius, y - radius, x + radius + 1, y + radius + 1);
+    }
 
     private void InvalidateModeHint()
     {
@@ -1100,6 +1283,34 @@ internal sealed class SelectionWindow
         }
     }
 
+    // Render the real GDI selection handles over generated pixels only.
+    internal static async Task RenderSyntheticHandlesAsync(string outputPath)
+    {
+        const int width = 360, height = 220;
+        byte[] pixels = new byte[width * height * 4];
+        for (int offset = 0; offset < pixels.Length; offset += 4)
+        {
+            pixels[offset] = 92; pixels[offset + 1] = 112; pixels[offset + 2] = 120; pixels[offset + 3] = 255;
+        }
+        var display = CapturedDisplay.FromOpaqueBgra(width, height, pixels);
+        var bounds = new Win32.Rect { Right = width, Bottom = height };
+        var selection = new SelectionWindow(display, bounds, pixels, confirmSelection: true, initialVideo: false);
+        try
+        {
+            selection._scale = 1;
+            selection._anchored = selection._selectionReady = true;
+            selection._anchorX = 50; selection._anchorY = 45;
+            selection._currentX = 310; selection._currentY = 175;
+            selection.PaintBuffer(0);
+            GdiCaptureNative.GdiFlush();
+            byte[] actual = selection._buffer.CopyOpaqueBgra();
+            using var image = ImageDocument.Import(ImageDescriptor.Rgba(width, height, width * 4),
+                CapturedDisplay.FromOpaqueBgra(width, height, actual).Rgba);
+            await File.WriteAllBytesAsync(outputPath, image.ExportPng());
+        }
+        finally { selection.Cancel(); }
+    }
+
     // Pure generated bitmap: normal, hover and keyboard-focus states. No HWND is
     // shown and no desktop pixels are acquired to produce this visual fixture.
     internal static async Task RenderCancelAppearanceAsync(string outputPath)
@@ -1221,6 +1432,7 @@ internal sealed class SelectionWindow
         [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
         [DllImport("user32.dll")] internal static extern short GetKeyState(int key);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern nint LoadCursor(nint instance, nint name);
+        [DllImport("user32.dll")] internal static extern nint SetCursor(nint cursor);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern nint SendMessage(nint window, uint message, nuint wParam, nint lParam);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern bool SetWindowText(nint window, string text);
         [DllImport("user32.dll")] internal static extern void NotifyWinEvent(uint eventId, nint window, int objectId, int childId);

@@ -47,8 +47,9 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             await RecordingAudioSmoke.VerifyAsync();
             _settings.VerifySyntheticRecordingSettings();
             await CaptureSetupWindow.VerifySyntheticAsync(_recordingWorkArea,
-                element => RenderFixtureAsync(element, Path.ChangeExtension(marker, ".recording-setup.png")),
-                element => RenderFixtureAsync(element, Path.ChangeExtension(marker, ".screenshot-setup.png")));
+                element => RenderFixtureAsync(element, Path.ChangeExtension(marker, ".capture-toolbar.png")),
+                element => RenderFixtureAsync(element, Path.ChangeExtension(marker, ".capture-settings.png")));
+            await SelectionWindow.RenderSyntheticHandlesAsync(Path.ChangeExtension(marker, ".selection-handles.png"));
             _settings.SetShortcutEditingEnabled(false);
             _settings.StartKeyCapture();
             if (_settings.IsLearningShortcut) throw new InvalidOperationException("Shortcut editing was not blocked during an update.");
@@ -119,7 +120,11 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             toolbar.AttachOwner(selector.Handle);
             nint toolbarHandle = WinRT.Interop.WindowNative.GetWindowHandle(toolbar);
             selector.SetToolbarHandle(toolbarHandle);
-            selector.SelectionChanged += toolbar.SetCanCapture;
+            selector.SelectionChanged += ready =>
+            {
+                toolbar.SetCanCapture(ready);
+                toolbar.SetCanRecord(ready && selector.CanRecordSelection);
+            };
             selector.Activated += toolbar.RaiseWithoutActivation;
             selector.ToolbarRequested += toolbar.ActivateForKeyboard;
             selector.Closing += toolbar.CloseSafely;

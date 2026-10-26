@@ -14,7 +14,7 @@
 
 - **Select an area or a window.** Drag a region across one or more monitors, or press Space to pick a window. The selection stays undimmed; window captures preserve available transparency and get a soft generated shadow.
 - **Keep each capture within reach.** PNG screenshots and MP4 recordings save automatically to Pictures/Ovi Screenshot. Previews stack at the screen edge. Hover for Copy, Save, Delete, and Close; double-click to open, or drag the file into another app. Delete removes the capture immediately; independent saved/shared copies stay.
-- **Record an area or a window.** The toolbar appears while you select; drag a selected area to move it, choose FPS and audio options, then press Record. A cancellable countdown, visible boundary, and compact controls follow. Audio starts off; paused time is excluded from the MP4.
+- **Record an area or a window.** The toolbar appears while you select; drag the area to move it or its handles to resize it. Choose FPS and audio in the settings menu, then press Record. A cancellable countdown, visible boundary, and compact controls follow. Audio starts off; paused time is excluded from the MP4.
 - **Use native Windows controls.** Start from the tray or your chosen shortcut. Menus and settings follow the Windows theme, and preview actions support keyboard focus.
 
 A short, soft sound confirms successful screenshots. Canceling a capture stays silent.
@@ -32,8 +32,7 @@ A short, soft sound confirms successful screenshots. Canceling a capture stays s
 **Capture selector**
 
 <p>
-  <img src="docs/assets/capture-setup.png" alt="WinUI selector in screenshot mode" width="420"><br>
-  <img src="docs/assets/recording-setup.png" alt="WinUI selector in video mode, with frame rate, audio switches and Record" width="700">
+  <img src="docs/assets/capture-setup.png" alt="WinUI capture toolbar with screenshot, video, settings and cancel actions" width="280">
 </p>
 
 **Recording controls and countdown**
