@@ -46,7 +46,9 @@ Disable the selection window's own opening transition and prepare its backing bi
 
 During screenshot selection, Space toggles window mode. Hover highlights the topmost eligible window, click/Enter captures it, arrows cycle targets, and Space returns to area mode. Keep full native window capture separate from the clipped on-monitor highlight; capture the selected window itself through WGC, even if it spans displays. PNG output preserves available native alpha and adds an app-generated soft shadow on a transparent margin, without a desktop background. Exact native DWM/macOS shadow parity is not promised. Recording remains selected-area mode. Screen mode is a later increment. Do not promise capture of minimized, protected, or otherwise unavailable windows; show an actionable error.
 
-The first implementation selects within the pointer's monitor. First release must allow initiating capture on any monitor. Regions spanning displays are deferred and must stop visibly at the chosen display edge. The model still records per-display transforms so later support is possible.
+Screenshot selection spans the connected desktop in physical pixel coordinates. A frozen image is prepared before showing the overlay; monitor gaps are explicitly black. Cancel and the mode hint stay in the initiating monitor's work area, scaled for that monitor. A preview appears on the monitor containing the largest part of the capture. Window picking can target windows on any display.
+
+For video, move the unanchored selector onto any monitor before starting the drag. The first corner latches that monitor; the second corner is clamped to its edge. Convert the final desktop rectangle into that monitor's local physical pixels before starting its WGC recorder. Display changes cancel the selection rather than recording a shifted crop.
 
 Ignore or clearly signal a repeated capture hotkey while a session is active. Monitor removal, lock, sleep, or capture failure must end the overlay session cleanly.
 

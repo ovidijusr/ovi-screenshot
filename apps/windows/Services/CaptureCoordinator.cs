@@ -41,13 +41,18 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
         {
             if (settingsVisible || previewsVisible || recordingControlVisible)
                 await Task.Run(Win32.FlushDesktopComposition, cancellation.Token);
-            var monitor = Win32.PointerMonitor();
-            var display = await MonitorCapture.AcquireAsync(monitor.Monitor, cancellation.Token);
+            var topology = DisplayTopology.Enumerate();
+            if (!Win32.GetCursorPos(out var pointer)) throw new InvalidOperationException("The pointer position is unavailable.");
+            var initialMonitor = topology.AtPoint(pointer);
+            var display = await DesktopCapture.AcquireAsync(topology, cancellation.Token);
             var pixels = display.PremultipliedBgra ?? await Task.Run(() => BitmapSources.ToPremultipliedBgra(display.Rgba), cancellation.Token);
             IReadOnlyList<WindowCaptureTarget>? windows = recordVideo ? null : await Task.Run(WindowTargets.Enumerate, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
+            EnsureDisplaysUnchanged(topology);
 
-            _selection = new SelectionWindow(display, monitor.Info.Monitor, pixels, windows);
+            _selection = new SelectionWindow(display, topology.Bounds, pixels, windows,
+                controlsBounds: initialMonitor.WorkArea,
+                areaLimits: recordVideo ? topology.Monitors.Select(monitor => monitor.Bounds).ToArray() : null);
             PixelSelection? region = await _selection.SelectAsync();
             WindowCaptureTarget? window = _selection.SelectedWindow;
             _selection = null;
@@ -58,20 +63,29 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
                 return;
             }
 
+            EnsureDisplaysUnchanged(topology);
+            Win32.Rect desktopRegion = SelectionCoordinates.ToDesktop(region.Value, topology.Bounds);
+            if (!SelectionCoordinates.IncludesDisplayPixels(topology, desktopRegion))
+                throw new InvalidOperationException("Select an area that includes a display.");
+
             if (recordVideo)
             {
-                if (!await CountDownAsync(region.Value, monitor.Info.Monitor, monitor.Info.Work, cancellation.Token))
+                var monitor = SelectionCoordinates.RecordingMonitor(topology, desktopRegion);
+                var recordingRegion = SelectionCoordinates.ToMonitor(desktopRegion, monitor);
+                if (!await CountDownAsync(recordingRegion, monitor.Bounds, monitor.WorkArea, cancellation.Token))
                 {
                     RestoreFocus(previousFocus, settingsVisible);
                     return;
                 }
+                EnsureDisplaysUnchanged(topology);
                 await Task.Run(Win32.FlushDesktopComposition, cancellation.Token);
-                await recordings.StartAsync(monitor.Monitor, region.Value, monitor.Info.Monitor, monitor.Info.Work, cancellation.Token);
+                await recordings.StartAsync(monitor.Handle, recordingRegion, monitor.Bounds, monitor.WorkArea, cancellation.Token);
                 _lastWasRecording = true;
             }
             else
             {
-                _lastCapture = await CreateScreenshotAsync(display, region.Value, window, monitor.Info.Work, cancellation.Token);
+                var placement = topology.ForRectangle(window?.Bounds ?? desktopRegion);
+                _lastCapture = await CreateScreenshotAsync(display, region.Value, window, placement.WorkArea, cancellation.Token);
                 cancellation.Token.ThrowIfCancellationRequested();
                 _lastWasRecording = false;
                 if (!_stopping)
@@ -95,6 +109,11 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
                 if (recordingControlVisible) recordings.ShowControl();
             }
         }
+    }
+
+    private static void EnsureDisplaysUnchanged(DisplayTopology topology)
+    {
+        if (!topology.IsCurrent()) throw new InvalidOperationException("The display layout changed. Start the capture again.");
     }
 
     private static async Task<CaptureResult> CreateScreenshotAsync(CapturedDisplay display, PixelSelection region,

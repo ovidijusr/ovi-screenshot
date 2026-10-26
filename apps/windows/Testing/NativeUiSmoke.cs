@@ -30,6 +30,17 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
         try
         {
             await WindowCapture.VerifySyntheticCleanupAsync();
+            DesktopCaptureSmoke.Verify();
+            SelectionCoordinatesSmoke.Verify();
+            SelectionWindow.VerifySyntheticMultiDisplaySelection();
+            var connectedDisplays = DisplayTopology.Enumerate();
+            if (!connectedDisplays.IsCurrent()) throw new InvalidOperationException("The display layout changed during the native fixture.");
+            var connected = connectedDisplays.Monitors[0];
+            var shiftedBounds = connected.Bounds;
+            shiftedBounds.Left++; shiftedBounds.Right++;
+            if (!connected.IsCurrent() || (connected with { Bounds = shiftedBounds }).IsCurrent())
+                throw new InvalidOperationException("Recording monitor validation ignored a same-size change of origin.");
+            await VerifyMultiDisplayOverlayAsync();
             await ServiceSmoke.VerifyAsync(Path.ChangeExtension(marker, ".service-cache"));
             _settings.SetShortcutEditingEnabled(false);
             _settings.StartKeyCapture();
@@ -45,13 +56,41 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             await SelectionWindow.RenderCancelAppearanceAsync(Path.ChangeExtension(marker, ".cancel.png"));
             await VerifyWindowCaptureAsync(marker);
             await RenderDocumentationImagesAsync(marker);
-            return "PASS recording outline, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window capture/PNG alpha, preview stack, shared-capture trash/busy protection/adaptive actions, drag payload, tray menu, shortcuts and bitmap geometry. " + details + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture or cross-app launch/drop performed.";
+            return "PASS multi-display composition/routing/selection and generated overlay; recording outline, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window capture/PNG alpha, preview stack, shared-capture trash/busy protection/adaptive actions, drag payload, tray menu, shortcuts and bitmap geometry. " + details + $" Connected displays: {connectedDisplays.Monitors.Count}." + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture or cross-app launch/drop performed.";
         }
         finally
         {
             await _previews.ShutdownAsync();
             _recordingControl.CloseSafely();
         }
+    }
+
+    private async Task VerifyMultiDisplayOverlayAsync()
+    {
+        int width = Math.Min(640, _recordingWorkArea.Width - 48);
+        int height = Math.Min(260, _recordingWorkArea.Height - 48);
+        int left = _recordingWorkArea.Left + 24, top = _recordingWorkArea.Top + 24;
+        var bounds = new Win32.Rect { Left = left, Top = top, Right = left + width, Bottom = top + height };
+        var first = new Win32.Rect { Left = left, Top = top, Right = left + width / 2, Bottom = top + height };
+        var second = new Win32.Rect { Left = first.Right, Top = top, Right = bounds.Right, Bottom = bounds.Bottom };
+        byte[] pixels = new byte[width * height * 4];
+        for (int offset = 0; offset < pixels.Length; offset += 4)
+        {
+            pixels[offset] = 80; pixels[offset + 1] = 105; pixels[offset + 2] = 40; pixels[offset + 3] = 255;
+        }
+        var overlay = new SelectionWindow(CapturedDisplay.FromOpaqueBgra(width, height, pixels), bounds, pixels,
+            controlsBounds: second, areaLimits: [first, second]);
+        try
+        {
+            Task<PixelSelection?> selected = overlay.SelectAsync();
+            await Task.Delay(60);
+            if (!overlay.IsVisible || selected.IsCompleted)
+                throw new InvalidOperationException("The multi-display selector completed during hidden-window preparation or did not show.");
+            overlay.Cancel();
+            if (await selected.WaitAsync(TimeSpan.FromSeconds(3)) is not null || overlay.IsVisible)
+                throw new InvalidOperationException("The multi-display selector did not cancel and close cleanly.");
+        }
+        finally { overlay.Cancel(); }
     }
 
     private async Task VerifyRecordingUiAsync(string? marker)

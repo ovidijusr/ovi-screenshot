@@ -11,7 +11,7 @@ namespace Ovi.Screenshot.Views;
 
 internal readonly record struct PixelSelection(int X, int Y, int Width, int Height);
 
-// The full-monitor selector is a thin Win32 surface. Ordinary product windows stay
+// The virtual-desktop selector is a thin Win32 surface. Ordinary product windows stay
 // WinUI. Its frozen bitmap is ready before showing; no XAML upload/cloak warm-up.
 internal sealed class SelectionWindow
 {
@@ -23,6 +23,8 @@ internal sealed class SelectionWindow
     private static ushort _classAtom;
     private readonly CapturedDisplay _capture;
     private readonly Win32.Rect _bounds;
+    private readonly IReadOnlyList<Win32.Rect>? _areaLimits;
+    private Win32.Rect? _activeAreaLimit;
     private readonly IReadOnlyList<WindowCaptureTarget> _windows;
     private readonly NativeCaptureBitmap _source, _buffer;
     private readonly TaskCompletionSource<PixelSelection?> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -46,10 +48,16 @@ internal sealed class SelectionWindow
     internal bool IsVisible => _window != 0 && Native.IsWindowVisible(_window);
     internal WindowCaptureTarget? SelectedWindow { get; private set; }
 
-    internal SelectionWindow(CapturedDisplay capture, Win32.Rect bounds, byte[]? preparedBgra = null, IReadOnlyList<WindowCaptureTarget>? windows = null)
+    internal SelectionWindow(CapturedDisplay capture, Win32.Rect bounds, byte[]? preparedBgra = null,
+        IReadOnlyList<WindowCaptureTarget>? windows = null, Win32.Rect? controlsBounds = null,
+        IReadOnlyList<Win32.Rect>? areaLimits = null)
     {
         if (bounds.Width <= 0 || bounds.Height <= 0) throw new ArgumentOutOfRangeException(nameof(bounds));
         _capture = capture; _bounds = bounds;
+        Win32.Rect controls = ClipWindow(controlsBounds ?? bounds, bounds);
+        if (controls.Width <= 0 || controls.Height <= 0) throw new ArgumentException("Selection controls must be inside the captured desktop.", nameof(controlsBounds));
+        _areaLimits = areaLimits?.Select(limit => ClipWindow(limit, bounds)).Where(limit => limit.Width > 0 && limit.Height > 0).ToArray();
+        if (_areaLimits is { Count: 0 }) throw new ArgumentException("Recording selection requires an available display.", nameof(areaLimits));
         _windows = windows?.Where(target => target.Handle != 0 && ClipWindow(target.Bounds, bounds) is { Width: > 0, Height: > 0 }).ToArray() ?? [];
         byte[] pixels = preparedBgra ?? capture.PremultipliedBgra ?? BitmapSources.ToPremultipliedBgra(capture.Rgba);
         _source = NativeCaptureBitmap.FromBgra(capture.Width, capture.Height, pixels);
@@ -62,29 +70,23 @@ internal sealed class SelectionWindow
             RegisterClass();
             _window = Native.CreateWindowEx(0x00000008 | 0x00000080 | 0x00010000, ClassName,
                 "Select screenshot area. Drag or use arrows and Enter. Escape cancels.", 0x80000000 | 0x02000000,
-                bounds.Left, bounds.Top, Width, Height, 0, 0, Native.GetModuleHandle(null), 0);
+                controls.Left, controls.Top, controls.Width, controls.Height, 0, 0, Native.GetModuleHandle(null), 0);
             if (_window == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+            uint dpi = Win32.GetDpiForWindow(_window);
+            _scale = dpi == 0 ? 1 : dpi / 96d;
+            // Construction DPI messages must use DefWindowProc, not cancel a
+            // partially built selector. Keep the HWND hidden until fully painted.
+            if (!Win32.SetWindowPos(_window, 0, bounds.Left, bounds.Top, Width, Height, Win32.SwpNoActivate | 0x0004))
+                throw new InvalidOperationException("Could not position the selection canvas."); // SWP_NOZORDER
             Windows.Add(_window, this);
             Win32.DisableWindowTransitions(_window);
             Win32.SetWindowDisplayAffinity(_window, 0x11);
             if (Win32.GetCursorPos(out var pointer)) SetCurrent(pointer.X - bounds.Left, pointer.Y - bounds.Top);
-            _scale = Win32.GetDpiForWindow(_window) / 96d;
-            int buttonWidth = Dip(112), buttonHeight = Dip(40);
-            _cancelBounds = new Win32.Rect
-            {
-                Left = (Width - buttonWidth) / 2, Top = Height - buttonHeight - Dip(20),
-                Right = (Width + buttonWidth) / 2, Bottom = Height - Dip(20)
-            };
-            int hintWidth = Math.Min(Dip(300), Math.Max(1, Width - Dip(24)));
-            _modeHintBounds = new Win32.Rect
-            {
-                Left = (Width - hintWidth) / 2, Right = (Width + hintWidth) / 2,
-                Top = Math.Max(0, _cancelBounds.Top - Dip(30)), Bottom = Math.Max(0, _cancelBounds.Top - Dip(4))
-            };
+            (_cancelBounds, _modeHintBounds) = PlaceControls(bounds, controls, _scale);
             _cancelFont = CreateUiFont(13, _scale);
             _hintFont = CreateUiFont(11, _scale);
             _cancel = Native.CreateWindowEx(0, "BUTTON", "Cancel (Esc)", 0x40000000 | 0x10000000 | 0x00010000 | 0x0000000B,
-                _cancelBounds.Left, _cancelBounds.Top, buttonWidth, buttonHeight,
+                _cancelBounds.Left, _cancelBounds.Top, _cancelBounds.Width, _cancelBounds.Height,
                 _window, new nint(CancelId), Native.GetModuleHandle(null), 0);
             if (_cancel == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
             Native.SendMessage(_cancel, WindowMessage.SetFont, (nuint)_cancelFont, new nint(1));
@@ -172,37 +174,56 @@ internal sealed class SelectionWindow
             case WindowMessage.EraseBackground: return 1; // WM_ERASEBKGND: backing pixels always cover the client area.
             case WindowMessage.Paint: Paint(); return 0;
             case WindowMessage.LeftButtonDown:
+            {
+                var point = ReadPointer(lParam);
                 if (_windowMode)
                 {
-                    ChangeVisuals(() => SetCurrent(SignedLow(lParam), SignedHigh(lParam)));
+                    ChangeVisuals(() => SetCurrent(point.X, point.Y));
                     _pressedWindow = CurrentWindow();
                     _windowClickPending = true;
                     Native.SetFocus(_window); Native.SetCapture(_window); return 0;
                 }
-                ChangeVisuals(() => { SetCurrent(SignedLow(lParam), SignedHigh(lParam)); _anchorX = _currentX; _anchorY = _currentY; _anchored = _dragging = true; });
-                Native.SetFocus(_window); Native.SetCapture(_window); return 0;
+                ChangeVisuals(() =>
+                {
+                    ResetAreaAnchor();
+                    SetCurrent(point.X, point.Y);
+                    _dragging = TryAnchorCurrent();
+                });
+                Native.SetFocus(_window);
+                if (_dragging) Native.SetCapture(_window);
+                return 0;
+            }
             case WindowMessage.MouseMove:
-                MovePointer(SignedLow(lParam), SignedHigh(lParam)); return 0;
+            {
+                var point = ReadPointer(lParam, latest: true);
+                MovePointer(point.X, point.Y); return 0;
+            }
             case WindowMessage.LeftButtonUp:
+            {
+                var point = ReadPointer(lParam);
                 if (_windowClickPending)
                 {
-                    MovePointer(SignedLow(lParam), SignedHigh(lParam));
+                    MovePointer(point.X, point.Y);
                     bool confirm = ShouldConfirmWindowRelease(_pressedWindow, CurrentWindow());
                     ClearPointerCapture();
                     if (confirm) ConfirmWindow();
                     return 0;
                 }
                 if (!_dragging) return 0;
-                ChangeVisuals(() => SetCurrent(SignedLow(lParam), SignedHigh(lParam)));
+                ChangeVisuals(() => SetCurrent(point.X, point.Y));
                 ClearPointerCapture();
                 if (CurrentSelection() is { Width: > 0, Height: > 0 } area) Finish(area);
-                else ChangeVisuals(() => _anchored = false);
+                else ChangeVisuals(ResetAreaAnchor);
                 return 0;
+            }
             case WindowMessage.KeyDown:
                 if ((uint)wParam == 0x20 && ((long)lParam & (1L << 30)) != 0) return 0;
                 HandleKey((uint)wParam); return 0;
             case WindowMessage.Command: if ((int)(wParam & 0xFFFF) == CancelId) { Finish(null); return 0; } break;
-            case WindowMessage.Close: case WindowMessage.CancelMode: case WindowMessage.DisplayChanged: case WindowMessage.DpiChanged: Finish(null); return 0;
+            case WindowMessage.Close: case WindowMessage.CancelMode: Finish(null); return 0;
+            case WindowMessage.DisplayChanged: case WindowMessage.DpiChanged:
+                if (_shown) Finish(null);
+                return 0;
             case WindowMessage.CaptureChanged: if (_dragging || _windowClickPending) Finish(null); return 0;
             case WindowMessage.Activate: if (_shown && ((uint)wParam & 0xFFFF) == 0) Finish(null); break;
             case WindowMessage.PowerBroadcast: if ((uint)wParam is 4 or 7) Finish(null); break;
@@ -234,7 +255,7 @@ internal sealed class SelectionWindow
         }
         if (key == 0x0D)
         {
-            if (!_anchored) ChangeVisuals(() => { _anchorX = _currentX; _anchorY = _currentY; _anchored = true; });
+            if (!_anchored) ChangeVisuals(() => TryAnchorCurrent());
             else if (CurrentSelection() is { Width: > 0, Height: > 0 } area) Finish(area);
             Announce(); return;
         }
@@ -243,10 +264,10 @@ internal sealed class SelectionWindow
         {
             switch (key)
             {
-                case 0x25: _currentX = Math.Max(0, _currentX - step); break;
-                case 0x27: _currentX = Math.Min(_capture.Width, _currentX + step); break;
-                case 0x26: _currentY = Math.Max(0, _currentY - step); break;
-                case 0x28: _currentY = Math.Min(_capture.Height, _currentY + step); break;
+                case 0x25: SetSourcePoint(_currentX - step, _currentY); break;
+                case 0x27: SetSourcePoint(_currentX + step, _currentY); break;
+                case 0x26: SetSourcePoint(_currentX, _currentY - step); break;
+                case 0x28: SetSourcePoint(_currentX, _currentY + step); break;
             }
         });
         if (key is >= 0x25 and <= 0x28) Announce();
@@ -263,15 +284,16 @@ internal sealed class SelectionWindow
             return;
         }
         var selection = CurrentSelection();
-        Native.SetWindowText(_window, _anchored ? $"Selected area {selection.Width} by {selection.Height} pixels. Enter captures. Escape cancels."
+        bool inGap = !_anchored && !TryLatchAreaLimit(_areaLimits, _bounds, _capture.Width, _capture.Height, _currentX, _currentY, out _);
+        Native.SetWindowText(_window, inGap ? "Move the selection cursor onto a display. Enter sets a corner. Escape cancels."
+            : _anchored ? $"Selected area {selection.Width} by {selection.Height} pixels. Enter captures. Escape cancels."
             : $"Selection cursor {_currentX}, {_currentY}. Enter sets a corner. Escape cancels.");
         Native.NotifyWinEvent(0x800C, _window, 0, 0);
     }
 
     private void SetCurrent(int x, int y)
     {
-        _currentX = Math.Clamp((int)Math.Round(x * (double)_capture.Width / Width), 0, _capture.Width);
-        _currentY = Math.Clamp((int)Math.Round(y * (double)_capture.Height / Height), 0, _capture.Height);
+        SetSourcePoint((int)Math.Round(x * (double)_capture.Width / Width), (int)Math.Round(y * (double)_capture.Height / Height));
         if (_windowMode)
         {
             int previous = _windowIndex;
@@ -279,6 +301,35 @@ internal sealed class SelectionWindow
             if (_windowIndex != previous) Announce();
         }
     }
+
+    private void SetSourcePoint(int x, int y) =>
+        (_currentX, _currentY) = ClampAreaPoint(x, y, _capture.Width, _capture.Height, _activeAreaLimit);
+
+    private bool TryAnchorCurrent()
+    {
+        if (!TryLatchAreaLimit(_areaLimits, _bounds, _capture.Width, _capture.Height, _currentX, _currentY, out var limit)) return false;
+        _activeAreaLimit = limit;
+        SetSourcePoint(_currentX, _currentY);
+        _anchorX = _currentX; _anchorY = _currentY; _anchored = true;
+        return true;
+    }
+
+    private void ResetAreaAnchor()
+    {
+        _anchored = false;
+        _activeAreaLimit = null;
+    }
+
+    private (int X, int Y) ReadPointer(nint messagePoint, bool latest = false)
+    {
+        // A button's queued position defines the exact corner, even if the cursor
+        // moved before dispatch. Supported canvases fit the signed client range.
+        if (latest && Win32.GetCursorPos(out var point)) return ScreenToViewport(_bounds, point);
+        return (SignedLow(messagePoint), SignedHigh(messagePoint));
+    }
+
+    private static (int X, int Y) ScreenToViewport(Win32.Rect bounds, Win32.Point point) =>
+        (checked(point.X - bounds.Left), checked(point.Y - bounds.Top));
 
     private void MovePointer(int x, int y)
     {
@@ -296,7 +347,7 @@ internal sealed class SelectionWindow
         ChangeVisuals(() =>
         {
             _windowMode = !_windowMode;
-            _anchored = false;
+            ResetAreaAnchor();
             _windowIndex = _windowMode ? HitTestWindow(_windows, _bounds.Left + Math.Min(X(_currentX), Width - 1), _bounds.Top + Math.Min(Y(_currentY), Height - 1)) : -1;
         });
         InvalidateModeHint();
@@ -354,6 +405,56 @@ internal sealed class SelectionWindow
         Right = Math.Min(window.Right, monitor.Right), Bottom = Math.Min(window.Bottom, monitor.Bottom)
     };
 
+    private static (Win32.Rect Cancel, Win32.Rect Hint) PlaceControls(Win32.Rect desktop, Win32.Rect requested, double scale)
+    {
+        Win32.Rect work = ClipWindow(requested, desktop);
+        if (work.Width <= 0 || work.Height <= 0 || !double.IsFinite(scale) || scale <= 0)
+            throw new ArgumentException("The selection controls have no usable display area.");
+        int Dip(double value) => Math.Max(1, (int)Math.Round(value * scale));
+        int horizontalInset = Math.Min(Dip(12), work.Width / 4);
+        int margin = Math.Min(Dip(20), work.Height / 4);
+        int width = Math.Min(Dip(112), Math.Max(1, work.Width - horizontalInset * 2));
+        int height = Math.Min(Dip(40), Math.Max(1, work.Height - margin * 2));
+        int left = work.Left - desktop.Left + (work.Width - width) / 2;
+        int top = work.Bottom - desktop.Top - margin - height;
+        var cancel = new Win32.Rect { Left = left, Top = top, Right = left + width, Bottom = top + height };
+        int hintWidth = Math.Min(Dip(300), Math.Max(1, work.Width - horizontalInset * 2));
+        int workTop = work.Top - desktop.Top;
+        int hintBottom = Math.Max(workTop, cancel.Top - Dip(4));
+        int hintHeight = Math.Min(Dip(26), hintBottom - workTop);
+        int hintLeft = work.Left - desktop.Left + (work.Width - hintWidth) / 2;
+        return (cancel, new Win32.Rect { Left = hintLeft, Top = hintBottom - hintHeight, Right = hintLeft + hintWidth, Bottom = hintBottom });
+    }
+
+    private static (int X, int Y) ClampAreaPoint(int x, int y, int width, int height, Win32.Rect? activeLimit)
+    {
+        var limit = activeLimit ?? new Win32.Rect { Right = width, Bottom = height };
+        return (Math.Clamp(x, limit.Left, limit.Right), Math.Clamp(y, limit.Top, limit.Bottom));
+    }
+
+    private static bool TryLatchAreaLimit(IReadOnlyList<Win32.Rect>? limits, Win32.Rect desktop,
+        int width, int height, int x, int y, out Win32.Rect? activeLimit)
+    {
+        activeLimit = null;
+        if (limits is null) return true;
+        int screenX = desktop.Left + Math.Clamp((int)Math.Round(x * (double)desktop.Width / width), 0, desktop.Width - 1);
+        int screenY = desktop.Top + Math.Clamp((int)Math.Round(y * (double)desktop.Height / height), 0, desktop.Height - 1);
+        foreach (var monitor in limits)
+        {
+            var clipped = ClipWindow(monitor, desktop);
+            if (screenX < clipped.Left || screenX >= clipped.Right || screenY < clipped.Top || screenY >= clipped.Bottom) continue;
+            activeLimit = new Win32.Rect
+            {
+                Left = Math.Clamp((int)Math.Floor((clipped.Left - desktop.Left) * (double)width / desktop.Width), 0, width),
+                Top = Math.Clamp((int)Math.Floor((clipped.Top - desktop.Top) * (double)height / desktop.Height), 0, height),
+                Right = Math.Clamp((int)Math.Ceiling((clipped.Right - desktop.Left) * (double)width / desktop.Width), 0, width),
+                Bottom = Math.Clamp((int)Math.Ceiling((clipped.Bottom - desktop.Top) * (double)height / desktop.Height), 0, height)
+            };
+            return true;
+        }
+        return false;
+    }
+
     private static bool TryWindowSelection(WindowCaptureTarget target, Win32.Rect monitor, int sourceWidth, int sourceHeight, out PixelSelection selection)
     {
         selection = default;
@@ -404,6 +505,52 @@ internal sealed class SelectionWindow
         static void Require(bool condition, string scenario)
         {
             if (!condition) throw new InvalidOperationException($"Window selection regression: {scenario}.");
+        }
+    }
+
+    internal static void VerifySyntheticMultiDisplaySelection()
+    {
+        var desktop = new Win32.Rect { Left = -1920, Top = -600, Right = 2560, Bottom = 1440 };
+        var left = new Win32.Rect { Left = -1920, Top = 0, Right = 0, Bottom = 1080 };
+        var right = new Win32.Rect { Left = 0, Top = -600, Right = 2560, Bottom = 1440 };
+        Win32.Rect[] displays = [left, right];
+        int width = desktop.Width, height = desktop.Height;
+        Require(ClampAreaPoint(4300, 200, width, height, null) == (4300, 200),
+            "unanchored movement remains free across unequal physical displays");
+        Require(TryLatchAreaLimit(displays, desktop, width, height, 100, 800, out var limit) &&
+            limit is { Left: 0, Top: 600, Right: 1920, Bottom: 1680 }, "video anchor latches the containing negative-origin display");
+        Require(ClampAreaPoint(4300, 0, width, height, limit) == (1920, 600) &&
+            ClampAreaPoint(-100, height, width, height, limit) == (0, 1680), "drag and keyboard endpoints cannot leave the latched video display");
+        Require(TryLatchAreaLimit(displays, desktop, width, height, 3000, 200, out limit) &&
+            limit is { Left: 1920, Top: 0, Right: 4480, Bottom: 2040 } &&
+            ClampAreaPoint(0, 1800, width, height, limit) == (1920, 1800), "a new anchor can latch the other display");
+        Require(TryLatchAreaLimit(displays, desktop, width, height, 1920, 800, out limit) && limit?.Left == 1920,
+            "shared display edges use the containing monitor's exclusive right boundary");
+        Require(!TryLatchAreaLimit(displays, desktop, width, height, 100, 100, out _), "a keyboard anchor in a monitor gap cannot start video selection");
+        Require(TryLatchAreaLimit(null, desktop, width, height, 100, 100, out limit) && limit is null &&
+            ClampAreaPoint(width, height, width, height, limit) == (width, height), "screenshots may span the full frozen virtual canvas, including gaps");
+        var target = new WindowCaptureTarget(new nint(10), new Win32.Rect { Left = -1500, Top = 200, Right = 500, Bottom = 900 }, "Across displays");
+        Require(TryWindowSelection(target, desktop, width, height, out var selection) && selection == new PixelSelection(420, 800, 2000, 700),
+            "a spanning window highlight maps once into the unscaled virtual bitmap");
+        var primaryWork = new Win32.Rect { Left = 0, Top = -600, Right = 2560, Bottom = 1400 };
+        var (cancel, hint) = PlaceControls(desktop, primaryWork, 1.5);
+        Require(InsideWork(cancel, primaryWork) && InsideWork(hint, primaryWork) && cancel.Width == 168 && cancel.Height == 60,
+            "controls stay on the initiating display and use its own DPI");
+        var (negativeCancel, negativeHint) = PlaceControls(desktop, left, 2);
+        Require(InsideWork(negativeCancel, left) && InsideWork(negativeHint, left) && negativeCancel.Width == 224,
+            "controls stay inside a negative-origin initiating display");
+        var tinyWork = new Win32.Rect { Left = 100, Top = 100, Right = 110, Bottom = 108 };
+        var (tinyCancel, tinyHint) = PlaceControls(desktop, tinyWork, 2);
+        Require(InsideWork(tinyCancel, tinyWork) && InsideWork(tinyHint, tinyWork), "controls clamp to a small available work area");
+        var large = new Win32.Rect { Left = -25000, Top = -5000, Right = 25000, Bottom = 5000 };
+        Require(ScreenToViewport(large, new Win32.Point { X = 15000, Y = -1234 }) == (40000, 3766),
+            "screen pointer coordinates do not wrap through a signed 16-bit client position");
+
+        bool InsideWork(Win32.Rect viewport, Win32.Rect work) => viewport.Left + desktop.Left >= work.Left &&
+            viewport.Right + desktop.Left <= work.Right && viewport.Top + desktop.Top >= work.Top && viewport.Bottom + desktop.Top <= work.Bottom;
+        static void Require(bool condition, string scenario)
+        {
+            if (!condition) throw new InvalidOperationException("Multi-display selection regression: " + scenario + ".");
         }
     }
     private PixelSelection CurrentSelection() => new(Math.Min(_anchorX, _currentX), Math.Min(_anchorY, _currentY), Math.Abs(_anchorX - _currentX), Math.Abs(_anchorY - _currentY));
@@ -495,6 +642,7 @@ internal sealed class SelectionWindow
 
     private void DrawModeHint()
     {
+        if (_modeHintBounds.Width <= 0 || _modeHintBounds.Height <= 0) return;
         ButtonPalette palette = ReadButtonPalette();
         int saved = Native.SaveDC(_buffer.Dc);
         nint brush = Native.CreateSolidBrush(palette.Fill), pen = Native.CreatePen(0, 1, palette.Stroke);

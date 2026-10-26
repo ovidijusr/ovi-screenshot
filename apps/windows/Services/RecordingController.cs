@@ -71,10 +71,13 @@ internal sealed class RecordingController
         string path = _library.NewPath();
         ScreenRecorder? recorder = null;
         RecordingBoundaryWindow? boundary = null;
+        var display = new DisplayMonitor(monitor, monitorBounds, workArea);
         try
         {
+            EnsureDisplayCurrent(display);
             recorder = await ScreenRecorder.StartAsync(monitor, region, path, cancellation);
             cancellation.ThrowIfCancellationRequested();
+            EnsureDisplayCurrent(display);
             var screenRegion = new Win32.Rect
             {
                 Left = monitorBounds.Left + region.X, Top = monitorBounds.Top + region.Y,
@@ -82,7 +85,8 @@ internal sealed class RecordingController
             };
             boundary = new RecordingBoundaryWindow(screenRegion, monitorBounds);
             boundary.Show();
-            _active = new ActiveRecording(recorder, boundary, path, workArea);
+            EnsureDisplayCurrent(display);
+            _active = new ActiveRecording(recorder, boundary, path, display);
             _stopTask = Task.CompletedTask;
             CloseControl();
             ShowControl();
@@ -105,7 +109,7 @@ internal sealed class RecordingController
         if (_stopping || (!IsActive && !HasPendingRecording)) return;
         if (_control is null)
         {
-            var control = new RecordingControlWindow(_active?.WorkArea ?? Win32.PointerMonitor().Info.Work);
+            var control = new RecordingControlWindow(_active?.Display.WorkArea ?? Win32.PointerMonitor().Info.Work);
             _control = control;
             control.StopRequested += StopAndSave;
             control.PauseRequested += TogglePause;
@@ -149,7 +153,14 @@ internal sealed class RecordingController
 
     private void RefreshElapsedTime()
     {
-        if (_active is { } session) _control?.SetElapsed(session.Recorder.Elapsed);
+        if (_active is not { } session) return;
+        if (!session.Display.IsCurrent()) { StopAndSave(); return; }
+        _control?.SetElapsed(session.Recorder.Elapsed);
+    }
+
+    private static void EnsureDisplayCurrent(DisplayMonitor display)
+    {
+        if (!display.IsCurrent()) throw new InvalidOperationException("The recording display changed. Select its area again.");
     }
 
     private async Task ObserveCompletionAsync(ScreenRecorder recorder)
@@ -286,5 +297,5 @@ internal sealed class RecordingController
         _interactive.Dispose();
     }
 
-    private sealed record ActiveRecording(ScreenRecorder Recorder, RecordingBoundaryWindow Boundary, string Path, Win32.Rect WorkArea);
+    private sealed record ActiveRecording(ScreenRecorder Recorder, RecordingBoundaryWindow Boundary, string Path, DisplayMonitor Display);
 }

@@ -13,7 +13,7 @@ This document separates the current preview from planned work. The [README](../R
 - Recoverable completed recordings, atomic settings, bounded PNG memory storage, and seven-day inactive cache retention.
 - Synthetic Rust, bridge, service, native UI and video checks; a portable Windows x64 packaging script.
 
-The current cache is not an editable or browsable screenshot history. Recording has no audio. The image pipeline is SDR. Each selected region stays on one display; spanning displays is not implemented.
+The current cache is not an editable or browsable screenshot history. Recording has no audio. The image pipeline is SDR. Screenshot regions can span connected displays. A video stays on the display where its selection starts; cross-monitor video is not implemented.
 
 ## Before public distribution
 

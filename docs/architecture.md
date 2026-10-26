@@ -53,7 +53,9 @@ Thumbnail generation uses alpha-aware area filtering for substantial reductions 
 
 ### Windows
 
-Still screenshots use one native GDI BitBlt into a top-down BGRA DIB. A lightweight Win32 selector prepares its backing bitmap before reveal and repaints only crosshair/selection border regions. It avoids starting and stopping a recording capture session for each screenshot. Pixels convert to RGBA only after selection for the Rust pipeline. This prototype path is SDR; GDI does not apply color management, so HDR/wide-gamut fidelity needs a separate implementation.
+Still screenshots freeze the connected displays into a top-down BGRA DIB. `DisplayTopology` records physical monitor/work-area rectangles and the virtual bounds, including negative origins. `DesktopCapture` clears the canvas to black, copies each real monitor at its translated offset, and checks that the topology is still current. This keeps uneven-layout gaps deterministic. The single-monitor path reuses the existing capture adapter where applicable.
+
+A lightweight Win32 selector spans the frozen virtual desktop. Its bitmap is ready before reveal, and later paints update only crosshair/selection border regions. Controls are positioned and scaled for the initiating monitor; screenshot rectangles remain in physical source pixels across displays. The canvas is bounded to 32,768 pixels per axis and 64 Mi pixels before native allocation. Pixels convert to RGBA only after selection for the Rust pipeline. This is SDR; GDI does not apply color management, so HDR/wide-gamut fidelity needs a separate implementation.
 
 Video recording uses `Windows.Graphics.Capture` with explicit monitor interop for custom source selection. Window screenshots use `CreateForWindow`. [Monitor interop](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createformonitor), [window interop](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow).
 
@@ -64,9 +66,9 @@ Use WinUI 3 for ordinary app windows and a small Win32 layer for hotkeys, tray i
 Area/display capture flow:
 
 1. Register the configurable shortcut and report conflicts.
-2. Hide transient app surfaces and acquire a frozen frame for the chosen monitor.
+2. Hide transient app surfaces and acquire a frozen virtual-desktop frame for the connected displays.
 3. Release the temporary GDI capture resources after acquiring the frozen frame.
-4. Show borderless overlay window(s) displaying frozen image(s).
+4. Show the borderless virtual-desktop overlay with controls on the initiating display.
 5. Crop the selected source pixel rectangle and normalize its pixel/color representation.
 6. Import into Rust, create preview, and export through native output adapters.
 
@@ -94,13 +96,15 @@ The shared working representation is 8-bit SDR sRGB RGBA with a documented alpha
 
 Document coordinates use a top-left origin in source-image pixels, with floating-point annotation geometry. Crop bounds and final rasterization define exact integer pixel edges. UI points, DPI, canvas zoom, and pan are view transforms, never document coordinates.
 
-Maintain a transform per display: OS desktop coordinates → display-local logical coordinates → captured source pixels. Negative origins and different display scales are normal. Use Per-Monitor V2 awareness on Windows. Cross-monitor capture needs a defined resolution/compositing policy before it is added. [DPI guidance](https://learn.microsoft.com/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows).
+Windows uses Per-Monitor V2 awareness. Still-selection source pixels are physical desktop coordinates minus the virtual origin; video source pixels are desktop coordinates minus the chosen monitor origin. `SelectionCoordinates` makes those conversions explicit. DPI affects controls rather than rescaling the captured image, so screens with different effective scales retain their physical pixels. Negative origins and uneven layouts are normal. [DPI guidance](https://learn.microsoft.com/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows).
 
 ## Native screen recording
 
 Selected-area MP4 recording is implemented. On Windows, WGC supplies monitor frames, the native adapter crops the selected pixel region, and Windows `MediaStreamSource`/`MediaTranscoder` encodes H.264 MP4. Recording is video-only and SDR initially, capped at 30 fps. Odd region dimensions receive one padding pixel where the encoder requires even dimensions; content is not stretched.
 
 Stop finalizes and closes the output stream before the Save dialog or copy operation consumes the file. Keep unsaved recordings recoverable in the local cache. The synthetic recording harness tests the same encoder with generated frames and decodes its output without desktop capture. Native recording/permission/desktop behavior requires user-initiated acceptance tests.
+
+Video selection latches one physical monitor and converts the chosen desktop rectangle into that monitor's local coordinates. Its bounds are revalidated around asynchronous recorder startup and on the existing elapsed-time timer. If the monitor is removed, replaced or moved, the controller finalizes the active clip and removes its stale outline instead of continuing with an outdated desktop position.
 
 ## Shared C ABI
 

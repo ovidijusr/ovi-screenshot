@@ -157,7 +157,7 @@ internal sealed class NativeCaptureBitmap : IDisposable
 
 internal static class GdiCaptureNative
 {
-    internal const uint SrcCopy = 0x00CC0020, CaptureBlt = 0x40000000, NoMirrorBitmap = 0x80000000;
+    internal const uint SrcCopy = 0x00CC0020, CaptureBlt = 0x40000000, NoMirrorBitmap = 0x80000000, Blackness = 0x00000042;
     [StructLayout(LayoutKind.Sequential)] internal struct BitmapInfoHeader
     {
         public uint Size;
@@ -174,6 +174,7 @@ internal static class GdiCaptureNative
     [DllImport("gdi32.dll", SetLastError = true)] internal static extern nint CreateDIBSection(nint dc, in BitmapInfo info, uint usage, out nint bits, nint section, uint offset);
     [DllImport("gdi32.dll", SetLastError = true)] internal static extern nint SelectObject(nint dc, nint value);
     [DllImport("gdi32.dll", SetLastError = true)] internal static extern bool BitBlt(nint dc, int x, int y, int width, int height, nint source, int sourceX, int sourceY, uint operation);
+    [DllImport("gdi32.dll", SetLastError = true)] internal static extern bool PatBlt(nint dc, int x, int y, int width, int height, uint operation);
     [DllImport("gdi32.dll")] internal static extern bool StretchBlt(nint dc, int x, int y, int width, int height, nint source, int sourceX, int sourceY, int sourceWidth, int sourceHeight, uint operation);
     [DllImport("gdi32.dll")] internal static extern bool DeleteObject(nint value);
     [DllImport("gdi32.dll")] internal static extern bool DeleteDC(nint dc);
