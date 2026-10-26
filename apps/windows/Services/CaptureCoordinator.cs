@@ -74,7 +74,11 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
                 _lastCapture = await CreateScreenshotAsync(display, region.Value, window, monitor.Info.Work, cancellation.Token);
                 cancellation.Token.ThrowIfCancellationRequested();
                 _lastWasRecording = false;
-                if (!_stopping) previews.Show(_lastCapture);
+                if (!_stopping)
+                {
+                    previews.Show(_lastCapture);
+                    CaptureSound.Play();
+                }
             }
             if (!settingsVisible) RestoreFocus(previousFocus, false);
         }
@@ -125,7 +129,13 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
     {
         if (_stopping || !_captureTask.IsCompleted) return;
         if (_lastWasRecording || (_lastCapture is null && recordings.HasPendingRecording)) recordings.ShowControl();
-        else if (_lastCapture is not null) previews.Show(_lastCapture);
+        else if (_lastCapture is { IsDeleted: false }) previews.Show(_lastCapture);
+    }
+
+    internal void Forget(CaptureResult capture)
+    {
+        if (_lastCapture is not null && ReferenceEquals(_lastCapture.PngStorageIdentity, capture.PngStorageIdentity))
+            _lastCapture = null;
     }
 
     internal async Task StopAsync()

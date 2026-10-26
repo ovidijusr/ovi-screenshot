@@ -13,9 +13,11 @@
 ## What it does
 
 - **Select an area or a window.** Drag a region or press Space to pick a window. The selection stays undimmed; window captures preserve available transparency and get a soft generated shadow.
-- **Keep each capture within reach.** Previews stack at the screen edge. Hover for Copy, Save, and Close; double-click to open the full image, or drag its PNG into another app.
+- **Keep each capture within reach.** Previews stack at the screen edge. Hover for Copy, Save, Delete, and Close; double-click to open the full image, or drag its PNG into another app. Delete removes the app's capture immediately; saved/shared copies stay.
 - **Record just the area you need.** A cancellable three-second countdown, a visible boundary, and compact recording controls. Paused time is excluded from the video-only MP4.
 - **Use native Windows controls.** Start from the tray or your chosen shortcut. Menus and settings follow the Windows theme, and preview actions support keyboard focus.
+
+A short, soft sound confirms successful screenshots. Canceling a capture stays silent.
 
 ## App gallery
 
@@ -75,7 +77,7 @@ Bootstrap installs the pinned Rust toolchain under `.tools` without changing glo
 
 The app starts in the notification area near the clock. Click the capture-frame icon to select a screenshot area; right-click for recording, Settings, or Quit. The default capture shortcut is **Ctrl+Shift+4**. Existing profiles retain their configured shortcut; change it in Settings → Set key.
 
-During selection, **Space** switches between area and window mode and **Escape** cancels. Hover over a preview for its actions, or focus it and use **Ctrl+C**, **Ctrl+S**, and **Escape**. Double-click the image, or press Enter on its focused image, to open it.
+During selection, **Space** switches between area and window mode and **Escape** cancels. Hover over a preview for its actions, or focus it and use **Ctrl+C**, **Ctrl+S**, **Delete**, and **Escape**. Delete removes the capture; Escape only dismisses its preview. Double-click the image, or press Enter on its focused image, to open it.
 
 After building, [Start Ovi Screenshot.cmd](Start%20Ovi%20Screenshot.cmd) launches the latest successful development build. Quit an older running instance before switching versions. The [release guide](docs/release.md) explains how to produce a self-contained portable ZIP; packaging does not publish it.
 

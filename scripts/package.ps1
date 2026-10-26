@@ -66,7 +66,7 @@ try {
     }
     Copy-Item -LiteralPath $taskAppPri -Destination (Join-Path $taskPublish 'Ovi.Screenshot.pri')
     foreach ($taskRequired in @('Ovi.Screenshot.exe', 'Ovi.Screenshot.dll', 'Ovi.Screenshot.runtimeconfig.json',
-        'Ovi.Screenshot.pri', 'ovi_core.dll', 'coreclr.dll', 'hostfxr.dll', 'hostpolicy.dll', 'Microsoft.ui.xaml.dll')) {
+        'Ovi.Screenshot.pri', 'ovi_core.dll', 'coreclr.dll', 'hostfxr.dll', 'hostpolicy.dll', 'Microsoft.ui.xaml.dll', 'Assets\capture.wav')) {
         if (-not (Test-Path -LiteralPath (Join-Path $taskPublish $taskRequired) -PathType Leaf)) {
             throw "Portable publish is incomplete: missing $taskRequired. No ZIP was produced."
         }
@@ -90,7 +90,9 @@ Extract the entire ZIP to a writable folder, then run Ovi.Screenshot.exe.
 Keep all included files together. The app starts in the notification area.
 
 Click the tray icon or press Ctrl+Shift+4 to select a screenshot area.
-Escape cancels. Hover over a preview for Copy, Save and Close.
+Escape cancels. Hover over a preview for Copy, Save, Delete and Close.
+Delete removes the capture without confirmation; saved/shared copies stay.
+A short, soft sound confirms each successful screenshot.
 Right-click the tray icon for recording, Settings, and Quit.
 Use Settings > Set key to configure a different capture shortcut.
 

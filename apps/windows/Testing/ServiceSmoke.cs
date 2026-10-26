@@ -1,6 +1,8 @@
 using Ovi.Screenshot.Capture;
 using Ovi.Screenshot.Services;
 using Microsoft.UI.Dispatching;
+using Ovi.Screenshot.Native;
+using System.Buffers.Binary;
 
 namespace Ovi.Screenshot.Testing;
 
@@ -10,10 +12,31 @@ internal static class ServiceSmoke
     {
         var paths = new AppPaths(directory);
         Directory.CreateDirectory(paths.Root);
+        await VerifyCaptureSoundAsync();
         await VerifySettingsAsync(paths);
         await LogSmoke.VerifyAsync(Path.Combine(paths.Root, "logs"));
         await VerifyRecoveryLifetimeAsync(paths);
         await VerifyRecordingRecoveryAsync(paths);
+    }
+
+    private static async Task VerifyCaptureSoundAsync()
+    {
+        byte[] wave = await File.ReadAllBytesAsync(CaptureSound.AssetPath);
+        Require(wave.Length > 44 && wave.AsSpan(0, 4).SequenceEqual("RIFF"u8)
+            && wave.AsSpan(8, 4).SequenceEqual("WAVE"u8) && wave.AsSpan(36, 4).SequenceEqual("data"u8),
+            "The capture sound was missing or was not the expected WAV asset.");
+        uint sampleRate = BinaryPrimitives.ReadUInt32LittleEndian(wave.AsSpan(24, 4));
+        Require(sampleRate == 48000 && BinaryPrimitives.ReadUInt16LittleEndian(wave.AsSpan(22, 2)) == 1
+            && BinaryPrimitives.ReadUInt16LittleEndian(wave.AsSpan(34, 2)) == 16,
+            "The capture sound format changed unexpectedly.");
+        int samples = (wave.Length - 44) / 2;
+        int peak = 0;
+        for (int index = 44; index < wave.Length; index += 2)
+            peak = Math.Max(peak, Math.Abs((int)BinaryPrimitives.ReadInt16LittleEndian(wave.AsSpan(index, 2))));
+        Require(samples / (double)sampleRate is >= 0.1 and <= 0.2 && peak is > 0 and < 8192
+            && BinaryPrimitives.ReadInt16LittleEndian(wave.AsSpan(44, 2)) == 0
+            && BinaryPrimitives.ReadInt16LittleEndian(wave.AsSpan(wave.Length - 2, 2)) == 0,
+            "The capture sound exceeded its short/quiet envelope or gained abrupt endpoints.");
     }
 
     private static async Task VerifyRecoveryLifetimeAsync(AppPaths paths)

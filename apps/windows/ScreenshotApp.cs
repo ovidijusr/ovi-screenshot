@@ -59,6 +59,7 @@ public sealed partial class ScreenshotApp : Application
             _captures = new CaptureCoordinator(_settings, _previews, _recordings, Report);
             _recordings.CaptureRequested += _captures.RecordArea;
             _previews.Failed += _log.Write;
+            _previews.Deleted += _captures.Forget;
             nint handle = WinRT.Interop.WindowNative.GetWindowHandle(_settings);
             _desktop = new DesktopIntegration(handle, _captures.Screenshot, ShowSettings, Quit, _captures.ReopenLast, Report, _recordings.Toggle);
             _recordings.StateChanged += recording => _desktop.SetRecording(recording);

@@ -7,6 +7,7 @@ internal sealed class PreviewStack
 {
     internal const long ResidentPngBudget = 64L * 1024 * 1024;
     private readonly List<PreviewWindow> _windows = [];
+    private readonly HashSet<object> _deleting = new(ReferenceEqualityComparer.Instance);
     private int _suspended;
     private bool _arranging, _stopping, _cacheRequested;
     private Task _cacheWork = Task.CompletedTask;
@@ -16,10 +17,11 @@ internal sealed class PreviewStack
     internal bool IsBusy => _windows.Any(window => !window.IsClosed && window.IsBusy);
     internal long ResidentPngBytes => Windows.Select(window => window.Capture).DistinctBy(capture => capture.PngStorageIdentity).Sum(capture => capture.ResidentPngBytes);
     internal event Action<Exception>? Failed;
+    internal event Action<CaptureResult>? Deleted;
 
     internal void Show(CaptureResult capture)
     {
-        if (_stopping) return;
+        if (_stopping || capture.IsDeleted || _deleting.Contains(capture.PngStorageIdentity)) return;
         var existing = _windows.FirstOrDefault(window => !window.IsClosed && ReferenceEquals(window.Capture, capture));
         if (existing is not null)
         {
@@ -27,7 +29,7 @@ internal sealed class PreviewStack
             return;
         }
 
-        var preview = new PreviewWindow(capture);
+        var preview = new PreviewWindow(capture, this);
         _windows.Add(preview);
         preview.LayoutChanged += Arrange;
         preview.Failed += ReportFailure;
@@ -37,10 +39,63 @@ internal sealed class PreviewStack
             preview.Failed -= ReportFailure;
             _windows.Remove(preview);
             Arrange();
+            RefreshActionAvailability();
         };
         Arrange();
         if (_suspended == 0) preview.ShowWithoutActivation();
         RequestCacheTrim();
+    }
+
+    internal bool CanDelete(CaptureResult capture)
+    {
+        if (_stopping || capture.IsDeleted || _deleting.Contains(capture.PngStorageIdentity)) return false;
+        bool found = false;
+        foreach (var window in _windows)
+        {
+            if (window.IsClosed || !ReferenceEquals(window.Capture.PngStorageIdentity, capture.PngStorageIdentity)) continue;
+            found = true;
+            if (window.IsBusy) return false;
+        }
+        return found;
+    }
+
+    internal async Task DeleteAsync(PreviewWindow requester)
+    {
+        CaptureResult capture = requester.Capture;
+        if (!CanDelete(capture)) return;
+        object identity = capture.PngStorageIdentity;
+        var matches = Windows.Where(window => ReferenceEquals(window.Capture.PngStorageIdentity, identity)).ToArray();
+        var reservations = new List<(PreviewWindow Window, PreviewOperationGate.Operation Operation)>();
+        _deleting.Add(identity);
+        try
+        {
+            foreach (var window in matches)
+            {
+                var operation = window.TryBeginLinkedOperation();
+                if (operation is null) return;
+                reservations.Add((window, operation));
+            }
+            await capture.DeleteAsync();
+            try { Deleted?.Invoke(capture); }
+            catch (Exception error) { ReportFailure(error); }
+        }
+        finally
+        {
+            foreach (var (window, operation) in reservations)
+            {
+                try { window.CompleteLinkedOperation(operation); }
+                catch (Exception error) { ReportFailure(error); }
+            }
+            _deleting.Remove(identity);
+            RefreshActionAvailability();
+        }
+        if (capture.IsDeleted)
+            foreach (var window in matches) if (!window.IsClosed) window.Close();
+    }
+
+    internal void RefreshActionAvailability()
+    {
+        foreach (var window in Windows) window.RefreshActionAvailability();
     }
 
     internal void Suspend()
@@ -142,6 +197,8 @@ internal sealed class PreviewStack
 
 internal static class PreviewGeometry
 {
+    internal static int ToolbarColumns(double logicalWidth) => logicalWidth < 136 ? 2 : 4;
+
     // Logical content bounds are recalculated for the CURRENT display; capture metadata stays immutable.
     internal static SizeInt32 Fit(int imageWidth, int imageHeight, Win32.Rect area, double scale, bool feedback)
     {
@@ -152,7 +209,8 @@ internal static class PreviewGeometry
         double maxHeight = Math.Min(180, Math.Max(1, area.Height - margin * 2) / scale);
         double fit = Math.Min(maxWidth / imageWidth, maxHeight / imageHeight);
         int width = (int)Math.Round(Math.Min(maxWidth, Math.Max(108, imageWidth * fit)) * scale);
-        int height = (int)Math.Round(Math.Min(maxHeight, Math.Max(feedback ? 76 : 40, imageHeight * fit)) * scale);
+        int toolbarHeight = ToolbarColumns(width / scale) == 2 ? 80 : 48;
+        int height = (int)Math.Round(Math.Min(maxHeight, Math.Max(feedback ? Math.Max(76, toolbarHeight) : toolbarHeight, imageHeight * fit)) * scale);
         return new SizeInt32(Math.Clamp(width, 1, Math.Max(1, area.Width)), Math.Clamp(height, 1, Math.Max(1, area.Height)));
     }
 
@@ -168,8 +226,11 @@ internal static class PreviewGeometry
             throw new InvalidOperationException("Preview sizing exceeded its current work area.");
         var feedback = Fit(1000, 10, area, 1, true);
         var retry = Fit(1000, 10, area, 2, false);
-        if (feedback.Height < 76 || retry.Height != 80)
+        if (feedback.Height < 76 || retry.Height != 96)
             throw new InvalidOperationException("Preview feedback sizing reused stale physical pixels.");
+        var portrait = Fit(1, 1000, area, 1, false);
+        if (portrait.Width != 108 || ToolbarColumns(portrait.Width) != 2 || portrait.Height < 80 || ToolbarColumns(normal.Width) != 4)
+            throw new InvalidOperationException("Narrow preview actions do not fit the adaptive toolbar.");
     }
 }
 

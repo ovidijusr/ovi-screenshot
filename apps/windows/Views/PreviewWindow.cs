@@ -18,15 +18,17 @@ namespace Ovi.Screenshot.Views;
 internal sealed class PreviewWindow : Window
 {
     private readonly CaptureResult _capture;
+    private readonly PreviewStack _owner;
     private readonly nint _window;
     private readonly Grid _surface = new();
     private readonly Image _thumbnail;
-    private readonly StackPanel _controls = new() { Orientation = Orientation.Horizontal, Spacing = 2, Visibility = Visibility.Collapsed };
+    private readonly Grid _controls = new() { ColumnSpacing = 2, RowSpacing = 2, Visibility = Visibility.Collapsed };
     private readonly Border _controlHost;
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     private readonly Border _statusHost;
     private readonly Button _copy;
     private readonly Button _save;
+    private readonly Button _delete;
     private readonly Button _dismiss;
     private readonly WindowHook _themeHook;
     private readonly PreviewOperationGate _operations = new();
@@ -37,6 +39,8 @@ internal sealed class PreviewWindow : Window
     private DragStartingEventArgs? _dragStarting;
     private Win32.Rect _workArea;
     private double _displayScale = 1;
+    private int _controlColumns;
+    private bool _reportedBusy;
     private StorageFile? _openFile;
     private bool _closed, _pointerInside, _closePending, _windowActive, _keyboardMode, _displayRefreshQueued, _refreshingDisplay;
 
@@ -49,9 +53,9 @@ internal sealed class PreviewWindow : Window
     internal event Action? LayoutChanged;
     internal event Action<Exception>? Failed;
 
-    internal PreviewWindow(CaptureResult capture)
+    internal PreviewWindow(CaptureResult capture, PreviewStack owner)
     {
-        _capture = capture;
+        _capture = capture; _owner = owner;
         Title = "Screenshot preview — Ovi Screenshot";
         _window = WinRT.Interop.WindowNative.GetWindowHandle(this);
         AppWindow.IsShownInSwitchers = false;
@@ -72,7 +76,7 @@ internal sealed class PreviewWindow : Window
             Stretch = Stretch.Uniform, CanDrag = true, IsTabStop = true,
             HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch
         };
-        AutomationProperties.SetName(_thumbnail, "Screenshot. Double-click or press Enter to open. Drag to another app, or use Copy and Save.");
+        AutomationProperties.SetName(_thumbnail, "Screenshot. Double-click or press Enter to open. Drag to another app, or use Copy, Save and Delete.");
         AutomationProperties.SetAutomationId(_thumbnail, "ScreenshotThumbnail");
         _thumbnail.PointerPressed += (_, _) => _thumbnail.Focus(FocusState.Pointer);
         _thumbnail.DoubleTapped += (_, args) => { args.Handled = true; _ = OpenAsync(); };
@@ -83,11 +87,13 @@ internal sealed class PreviewWindow : Window
 
         _copy = IconButton("\uE8C8", "Copy screenshot", "CopyScreenshot", "Copy (Ctrl+C)");
         _save = IconButton("\uE74E", "Save screenshot", "SaveScreenshot", "Save (Ctrl+S)");
+        _delete = IconButton("\uE74D", "Delete screenshot", "DeleteScreenshot", "Delete screenshot (Delete)");
         _dismiss = IconButton("\uE8BB", "Dismiss screenshot preview", "DismissPreview", "Dismiss (Esc)");
         _copy.Click += async (_, _) => await CopyAsync();
         _save.Click += async (_, _) => await SaveAsync();
+        _delete.Click += async (_, _) => await DeleteAsync();
         _dismiss.Click += (_, _) => RequestClose();
-        _controls.Children.Add(_copy); _controls.Children.Add(_save); _controls.Children.Add(_dismiss);
+        _controls.Children.Add(_copy); _controls.Children.Add(_save); _controls.Children.Add(_delete); _controls.Children.Add(_dismiss);
         _controlHost = new Border
         {
             Child = _controls, Padding = new Thickness(3), CornerRadius = new CornerRadius(6),
@@ -177,9 +183,29 @@ internal sealed class PreviewWindow : Window
             bool changed = !_workArea.Equals(work) || _displayScale != scale || PixelSize.Width != size.Width || PixelSize.Height != size.Height;
             _workArea = work; _displayScale = scale;
             if (PixelSize.Width != size.Width || PixelSize.Height != size.Height) AppWindow.Resize(size);
+            ArrangeActionButtons(size.Width / scale);
             if (changed && notify) LayoutChanged?.Invoke();
         }
         finally { _refreshingDisplay = false; }
+    }
+
+    private void ArrangeActionButtons(double logicalWidth)
+    {
+        int columns = PreviewGeometry.ToolbarColumns(logicalWidth);
+        if (_controlColumns == columns) return;
+        _controlColumns = columns;
+        _controls.ColumnDefinitions.Clear();
+        _controls.RowDefinitions.Clear();
+        for (int column = 0; column < columns; column++)
+            _controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        for (int row = 0; row < 4 / columns; row++)
+            _controls.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        for (int index = 0; index < _controls.Children.Count; index++)
+        {
+            var button = (Button)_controls.Children[index];
+            Grid.SetColumn(button, index % columns);
+            Grid.SetRow(button, index / columns);
+        }
     }
 
     private void QueueDisplayRefresh()
@@ -208,6 +234,23 @@ internal sealed class PreviewWindow : Window
 
     internal Task WaitForIdleAsync() => _operations.WaitForIdleAsync();
 
+    internal PreviewOperationGate.Operation? TryBeginLinkedOperation()
+    {
+        if (_closed || _capture.IsDeleted) return null;
+        var operation = _operations.TryBegin();
+        if (operation is null) return null;
+        try { UpdateControls(); return operation; }
+        catch { operation.Dispose(); throw; }
+    }
+
+    internal void CompleteLinkedOperation(PreviewOperationGate.Operation operation)
+    {
+        operation.Dispose();
+        UpdateControls();
+    }
+
+    internal void RefreshActionAvailability() => UpdateControls();
+
     internal void Hide()
     {
         if (_closed) return;
@@ -217,7 +260,7 @@ internal sealed class PreviewWindow : Window
 
     internal void ShowWithoutActivation()
     {
-        if (_closed) return;
+        if (_closed || _capture.IsDeleted) return;
         _pointerInside = false;
         UpdateControls();
         if (!_closed) AppWindow.Show(false);
@@ -276,8 +319,16 @@ internal sealed class PreviewWindow : Window
         if (_closed) return;
         bool visible = _pointerInside || (_keyboardMode && HasFocusWithin()) || IsBusy;
         _controls.Visibility = _controlHost.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        _copy.IsEnabled = _save.IsEnabled = _operations.IsAccepting && !IsBusy;
-        if (_closePending && !IsBusy) Close();
+        bool available = _operations.IsAccepting && !IsBusy && !_capture.IsDeleted;
+        _copy.IsEnabled = _save.IsEnabled = available;
+        _delete.IsEnabled = available && _owner.CanDelete(_capture);
+        if (_dragOperation is null) _thumbnail.CanDrag = available;
+        if (_reportedBusy != IsBusy)
+        {
+            _reportedBusy = IsBusy;
+            _owner.RefreshActionAvailability();
+        }
+        if (!_closed && _closePending && !IsBusy) Close();
     }
 
     private void PreviewKeyDown(object sender, KeyRoutedEventArgs args)
@@ -286,6 +337,7 @@ internal sealed class PreviewWindow : Window
         _keyboardMode = true;
         UpdateControls();
         if (args.Key == VirtualKey.Escape) { args.Handled = true; RequestClose(); return; }
+        if (args.Key == VirtualKey.Delete) { args.Handled = true; _ = DeleteAsync(); return; }
         if (args.Key == VirtualKey.Enter && ReferenceEquals(FocusManager.GetFocusedElement(_surface.XamlRoot), _thumbnail))
         {
             args.Handled = true; _ = OpenAsync(); return;
@@ -390,9 +442,16 @@ internal sealed class PreviewWindow : Window
         await ConfirmAndCloseAsync("Saved");
     });
 
+    internal async Task DeleteAsync()
+    {
+        if (_closed || !_operations.IsAccepting || !_owner.CanDelete(_capture)) return;
+        try { ClearFeedback(); await _owner.DeleteAsync(this); }
+        catch (Exception error) { ShowFailure("Delete failed", error); }
+    }
+
     private async Task RunOperationAsync(string failureMessage, Func<Task> operationBody)
     {
-        if (_closed) return;
+        if (_closed || _capture.IsDeleted) return;
         var operation = _operations.TryBegin();
         if (operation is null) return;
         try

@@ -12,6 +12,10 @@ The right-click menu is a native WinUI MenuFlyout and follows the system app the
 
 Keep visible information brief. Do not show resolution/dimension labels on the capture overlay or screenshot preview. Preserve dimensions internally and for accessible keyboard feedback. The overlay shows the selection, crosshair, and Cancel; the preview shows the image with Copy, Save, and dismiss.
 
+Successful screenshots play a short, quiet capture tick asynchronously. Cancellation, capture failure, preview reopening and video selection stay silent. Do not change the system volume or replace an unavailable sound with a system beep.
+
+The preview also exposes a hover/focus-only Delete icon. Delete removes that capture and its internal backing payload immediately, without confirmation or a success delay; Reopen Last Preview cannot restore it. Saved files and published open/drag copies remain independent. Disable deletion during an active preview operation, and keep the capture retriable if its backing file cannot be deleted. Escape and Close continue to dismiss rather than delete.
+
 Recording reuses area selection, followed by a compact WinUI 3–2–1 countdown centered in the selected area and clamped to the work area. Escape or Cancel ends the countdown without starting a recording. Remove the countdown before acquiring recording frames.
 
 A small rounded WinUI panel shows elapsed recorded time, Pause/Resume, and Stop using native theme resources and accessible icon controls. Pausing freezes the displayed time and omits that interval from the saved MP4. Resume continues the same file using current screen content. Stop works while paused, finalizes the MP4, and opens the native Save dialog; canceling Save retains a Save control and cached recording. A pending recording must be resolved before another replaces it. The first recording implementation is video-only, SDR, with up to 30 fps; these technical settings are not displayed in the ordinary UI. Add audio in a separate increment if requested.

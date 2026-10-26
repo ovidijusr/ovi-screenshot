@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -39,11 +40,12 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             _recordingControl.MarkReady();
             _recordingControl.ShowSaveFailure();
             await VerifyPreviewAndDragAsync();
+            await VerifyPreviewDeletionAsync();
             string details = await VerifyTrayAndSelectionAsync();
             await SelectionWindow.RenderCancelAppearanceAsync(Path.ChangeExtension(marker, ".cancel.png"));
             await VerifyWindowCaptureAsync(marker);
             await RenderDocumentationImagesAsync(marker);
-            return "PASS recording outline, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window capture/PNG alpha, preview stack, drag payload, tray menu, shortcuts and bitmap geometry. " + details + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture or cross-app launch/drop performed.";
+            return "PASS recording outline, WinUI recording states, countdown completion/cancel, window-selection geometry, generated-window capture/PNG alpha, preview stack, shared-capture trash/busy protection/adaptive actions, drag payload, tray menu, shortcuts and bitmap geometry. " + details + " Documentation images render native app controls with generated demo content, not a live capture. No desktop capture or cross-app launch/drop performed.";
         }
         finally
         {
@@ -113,23 +115,22 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
     private async Task RenderDocumentationImagesAsync(string marker)
     {
         CaptureResult capture = await CreateDocumentationCaptureAsync();
-        var preview = new PreviewWindow(capture);
+        _previews.Show(capture);
+        var preview = _previews.Windows.Single(window => ReferenceEquals(window.Capture, capture));
         var surface = (Grid)preview.Content;
-        var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        surface.Loaded += (_, _) => loaded.TrySetResult();
         try
         {
             preview.Activate();
-            await loaded.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await WaitForLoadedAsync(surface);
             var thumbnail = surface.Children.OfType<Image>().Single();
             if (!thumbnail.Focus(FocusState.Keyboard))
                 throw new InvalidOperationException("Documentation preview could not receive keyboard focus.");
             await Task.Delay(100);
             bool actionsVisible = surface.Children.OfType<Border>().Any(border =>
-                border.Visibility == Visibility.Visible && border.Child is StackPanel actions &&
-                actions.Visibility == Visibility.Visible && actions.Children.OfType<Button>().Count() == 3);
+                border.Visibility == Visibility.Visible && border.Child is Grid actions &&
+                actions.Visibility == Visibility.Visible && actions.Children.OfType<Button>().Count() == 4);
             if (!actionsVisible)
-                throw new InvalidOperationException("Documentation preview did not show its real Copy, Save and Close controls.");
+                throw new InvalidOperationException("Documentation preview did not show its real Copy, Save, Delete and Close controls.");
             await RenderFixtureAsync(surface, Path.ChangeExtension(marker, ".screenshot-preview.png"));
         }
         finally { preview.Close(); }
@@ -141,6 +142,111 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
         _settings.Activate();
         await Task.Delay(100);
         await RenderFixtureAsync((FrameworkElement)_settings.Content, Path.ChangeExtension(marker, ".settings.png"));
+    }
+
+    private static async Task WaitForLoadedAsync(FrameworkElement element)
+    {
+        if (element.IsLoaded) return;
+        var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnLoaded(object sender, RoutedEventArgs args) => loaded.TrySetResult();
+        element.Loaded += OnLoaded;
+        try { await loaded.Task.WaitAsync(TimeSpan.FromSeconds(3)); }
+        finally { element.Loaded -= OnLoaded; }
+    }
+
+    private async Task VerifyPreviewDeletionAsync()
+    {
+        byte[] pixels = new byte[80 * 48 * 4];
+        for (int offset = 0; offset < pixels.Length; offset += 4)
+        {
+            pixels[offset] = 45; pixels[offset + 1] = 110;
+            pixels[offset + 2] = 190; pixels[offset + 3] = 255;
+        }
+        CaptureResult CreateCapture() => CaptureImageFactory.Create(new CapturedDisplay(80, 48, pixels),
+            new PixelSelection(0, 0, 80, 48), _recordingWorkArea);
+        var capture = CreateCapture();
+        var clone = capture with { };
+        byte[] portraitPixels = new byte[160 * 4];
+        for (int offset = 0; offset < portraitPixels.Length; offset += 4)
+        {
+            portraitPixels[offset] = 80; portraitPixels[offset + 1] = 150;
+            portraitPixels[offset + 2] = 110; portraitPixels[offset + 3] = 255;
+        }
+        var survivor = CaptureImageFactory.Create(new CapturedDisplay(1, 160, portraitPixels),
+            new PixelSelection(0, 0, 1, 160), _recordingWorkArea);
+        CaptureResult? latest = capture;
+        int deletedEvents = 0;
+        void OnDeleted(CaptureResult deleted)
+        {
+            deletedEvents++;
+            if (latest is not null && ReferenceEquals(latest.PngStorageIdentity, deleted.PngStorageIdentity)) latest = null;
+        }
+        _previews.Deleted += OnDeleted;
+        try
+        {
+            _previews.Show(capture); _previews.Show(clone); _previews.Show(survivor);
+            var selected = _previews.Windows.Single(window => ReferenceEquals(window.Capture, capture));
+            var peer = _previews.Windows.Single(window => ReferenceEquals(window.Capture, clone));
+            var narrow = _previews.Windows.Single(window => ReferenceEquals(window.Capture, survivor));
+            Grid Actions(PreviewWindow window) => ((Grid)window.Content).Children.OfType<Border>()
+                .Select(border => border.Child).OfType<Grid>().Single(grid => grid.Children.OfType<Button>().Count() == 4);
+            narrow.Activate();
+            await WaitForLoadedAsync((FrameworkElement)narrow.Content);
+            ((Grid)narrow.Content).Children.OfType<Image>().Single().Focus(FocusState.Keyboard);
+            await Task.Delay(50);
+            var narrowActions = Actions(narrow);
+            var narrowSurface = (Grid)narrow.Content;
+            if (narrowActions.ColumnDefinitions.Count != 2 || narrowActions.RowDefinitions.Count != 2 ||
+                narrowActions.ActualWidth + 16 > narrowSurface.ActualWidth || narrowActions.ActualHeight + 16 > narrowSurface.ActualHeight)
+                throw new InvalidOperationException("The four preview actions were clipped on a narrow capture.");
+            selected.Activate();
+            await WaitForLoadedAsync((FrameworkElement)selected.Content);
+            var thumbnail = ((Grid)selected.Content).Children.OfType<Image>().Single();
+            if (!thumbnail.Focus(FocusState.Keyboard)) throw new InvalidOperationException("Delete fixture could not focus its preview.");
+            await Task.Delay(50);
+            Button Trash(PreviewWindow window) => Actions(window).Children.OfType<Button>()
+                .Single(button => AutomationProperties.GetAutomationId(button) == "DeleteScreenshot");
+            var trash = Trash(selected);
+            if (AutomationProperties.GetName(trash) != "Delete screenshot")
+                throw new InvalidOperationException("The trash action has no accessible name.");
+
+            // The same gate is held by Copy/Save/Open and an active native drag.
+            var busy = peer.TryBeginLinkedOperation() ?? throw new InvalidOperationException("The peer preview could not reserve an operation.");
+            try
+            {
+                if (trash.IsEnabled || Trash(peer).IsEnabled || _previews.CanDelete(capture))
+                    throw new InvalidOperationException("A matching busy preview did not disable deletion across clones.");
+                await selected.DeleteAsync();
+                if (capture.IsDeleted) throw new InvalidOperationException("Deletion bypassed a matching preview's active operation.");
+            }
+            finally { peer.CompleteLinkedOperation(busy); }
+            if (!trash.IsEnabled) throw new InvalidOperationException("Trash did not recover after the peer operation completed.");
+
+            await capture.ReleaseResidentPngAsync();
+            byte[] png = await capture.ReadPngAsync();
+            var export = await PreviewDragData.PrepareAsync(new DataPackage(), png);
+            // The actual button and focused Delete key both use this same handler.
+            await selected.DeleteAsync();
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while ((!capture.IsDeleted || !selected.IsClosed || !peer.IsClosed) && DateTime.UtcNow < deadline) await Task.Delay(25);
+            if (!capture.IsDeleted || !clone.IsDeleted || !selected.IsClosed || !peer.IsClosed || deletedEvents != 1 || latest is not null)
+                throw new InvalidOperationException("The trash handler did not delete shared storage, close clones and notify the latest-capture owner exactly once.");
+            if (_previews.Windows.Count != 1 || survivor.IsDeleted)
+                throw new InvalidOperationException("Deleting one capture changed an unrelated preview.");
+            if (!(await File.ReadAllBytesAsync(export.Path)).AsSpan().SequenceEqual(png))
+                throw new InvalidOperationException("Deleting internal storage changed an exported image attachment.");
+            _previews.Show(capture); _previews.Show(clone);
+            if (_previews.Windows.Count != 1) throw new InvalidOperationException("Reopen resurrected a deleted capture.");
+            _previews.CloseAll();
+            _previews.Show(survivor);
+            if (_previews.Windows.Count != 1 || survivor.IsDeleted)
+                throw new InvalidOperationException("Ordinary dismissal unexpectedly deleted the screenshot.");
+        }
+        finally
+        {
+            _previews.Deleted -= OnDeleted;
+            _previews.CloseAll();
+        }
     }
 
     private async Task<CaptureResult> CreateDocumentationCaptureAsync()

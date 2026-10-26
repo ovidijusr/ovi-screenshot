@@ -13,5 +13,6 @@ First Windows 11 x64 preview. No public release has been published yet.
 - Portable Windows packaging and repository CI.
 - Guarded recording startup/recovery, corrected repeated-key learning, and exception-safe window-capture callback cleanup.
 - Shared bounded diagnostic logging, improved thumbnail downscaling, and lower peak shadow-processing memory.
+- Soft screenshot confirmation sound and immediate preview deletion, including its internal cached payload.
 
 Recording is video-only. macOS, annotations, browsable screenshot history, HDR conversion, signing and an installer are not included.

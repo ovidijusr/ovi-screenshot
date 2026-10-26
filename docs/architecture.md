@@ -41,6 +41,10 @@ The Rust crates, shared C header, Windows app, and build scripts are implemented
 
 Preview operations use an explicit serialized lifetime with an awaited shutdown boundary. Unanswered interactive dialogs can cancel; an accepted file write or native drag completes before the app exits. Immutable PNG payloads are shared between record copies, with a 64 MiB resident budget for open previews and async spill/readback from the export cache. The budget excludes thumbnails and temporary active read leases.
 
+Private `payload-*.png` backing files are separate from published `drag-*.png` handoff files. Delete reserves the operation gates of every preview sharing the payload, removes its internal backing, marks the shared payload deleted and clears the coordinator's last-capture reference. Failed deletion preserves usable data. Previously saved/exported copies and active read leases remain independent; deletion cannot recall data already handed to another app.
+
+Successful still capture queues a short, original WAV through the native asynchronous sound API after creating its preview. The WAV is bundled in development and published outputs. Audio failure is diagnostic only; it cannot fail the screenshot or substitute a system alert sound.
+
 Recording recovery is part of initialization: selection cannot start a new recording until the scan finishes. Recovery shares one task, observes shutdown cancellation and cannot repopulate a stopped controller. Shutdown drains the scan before disposing its cancellation source.
 
 Thumbnail generation uses alpha-aware area filtering for substantial reductions and bilinear filtering for smaller reductions. Area filtering preserves contributions from thin features that a four-sample thumbnail could miss. Window-shadow blur releases its temporary scratch storage before allocating the output image.
