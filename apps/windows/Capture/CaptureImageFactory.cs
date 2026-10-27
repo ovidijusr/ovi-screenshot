@@ -8,10 +8,13 @@ internal static class CaptureImageFactory
 {
     internal static CaptureResult Create(CapturedDisplay source, PixelSelection region, Win32.Rect workArea, bool windowShadow = false)
     {
-        using var document = ImportRegion(source, region);
-        if (!windowShadow) return Export(document, workArea);
-        using var styled = document.AddWindowShadow();
-        return Export(styled, workArea);
+        var document = ImportRegion(source, region);
+        if (windowShadow)
+        {
+            try { return Export(document.AddWindowShadow(), workArea); }
+            finally { document.Dispose(); }
+        }
+        return Export(document, workArea);
     }
 
     private static ImageDocument ImportRegion(CapturedDisplay source, PixelSelection region)
@@ -39,9 +42,23 @@ internal static class CaptureImageFactory
 
     private static CaptureResult Export(ImageDocument document, Win32.Rect workArea)
     {
-        var image = document.Info.Image;
-        var preview = document.RenderPreview(600, 360);
-        return new CaptureResult((int)image.Width, (int)image.Height, document.ExportPng(),
-            (int)preview.Image.Width, (int)preview.Image.Height, preview.Rgba, workArea);
+        try
+        {
+            var image = document.Info.Image;
+            var preview = document.RenderPreview(600, 360);
+            // The immutable document belongs to the encoder until it finishes.
+            // Preview pixels are ready now and need not wait for PNG compression.
+            Task<byte[]> png = Task.Run(() =>
+            {
+                using (document) return document.ExportPng();
+            });
+            return new CaptureResult((int)image.Width, (int)image.Height, png,
+                (int)preview.Image.Width, (int)preview.Image.Height, preview.Rgba, workArea);
+        }
+        catch
+        {
+            document.Dispose();
+            throw;
+        }
     }
 }

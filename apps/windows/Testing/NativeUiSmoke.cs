@@ -59,6 +59,7 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
             _recordingControl.MarkReady();
             _recordingControl.ShowSaveFailure();
             await VerifyPreviewAndDragAsync();
+            await PreviewStack.VerifyPendingDeletionAsync();
             await VerifyPreviewDeletionAsync();
             string details = await VerifyTrayAndSelectionAsync();
             await SelectionWindow.RenderCancelAppearanceAsync(Path.ChangeExtension(marker, ".cancel.png"));
@@ -272,6 +273,20 @@ internal sealed class NativeUiSmoke(SettingsWindow settings)
 
     private async Task VerifyPreviewDeletionAsync()
     {
+        var pendingSave = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int pendingDeletes = 0;
+        var pendingCapture = new CaptureResult(1, 1, new byte[] { 1 }, 1, 1, new byte[4], _recordingWorkArea);
+        _previews.Show(pendingCapture, () => PreviewStack.DeleteAfterSaveAsync(pendingSave.Task,
+            _ => { pendingDeletes++; return Task.CompletedTask; }));
+        var pendingWindow = _previews.Windows.Single(window => ReferenceEquals(window.Capture, pendingCapture));
+        Task pendingDeletion = pendingWindow.DeleteAsync();
+        if (pendingDeletion.IsCompleted || pendingCapture.IsDeleted || pendingDeletes != 0)
+            throw new InvalidOperationException("Deleting a preview did not wait for its pending automatic save.");
+        pendingSave.SetResult(new object());
+        await pendingDeletion.WaitAsync(TimeSpan.FromSeconds(3));
+        if (!pendingCapture.IsDeleted || !pendingWindow.IsClosed || pendingDeletes != 1)
+            throw new InvalidOperationException("Pending automatic save was not deleted with the preview.");
+
         byte[] pixels = new byte[80 * 48 * 4];
         for (int offset = 0; offset < pixels.Length; offset += 4)
         {

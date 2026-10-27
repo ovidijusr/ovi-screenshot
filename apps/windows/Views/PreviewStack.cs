@@ -71,6 +71,30 @@ internal sealed class PreviewStack
     internal string? SavedPath(CaptureResult capture) =>
         _ownedFiles.TryGetValue(capture.PngStorageIdentity, out var owned) ? owned.Path : null;
 
+    internal void SetSavedPath(CaptureResult capture, string path)
+    {
+        if (_ownedFiles.TryGetValue(capture.PngStorageIdentity, out var owned)) owned.Path = path;
+    }
+
+    internal static async Task DeleteAfterSaveAsync<T>(Task<T?> pending, Func<T, Task> delete) where T : class
+    {
+        T? saved = await pending;
+        if (saved is not null) await delete(saved);
+    }
+
+    internal static async Task VerifyPendingDeletionAsync()
+    {
+        var pending = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int deletes = 0;
+        Task deletion = DeleteAfterSaveAsync(pending.Task, _ => { deletes++; return Task.CompletedTask; });
+        if (deletion.IsCompleted || deletes != 0) throw new InvalidOperationException("Pending save was not awaited before deleting.");
+        pending.SetResult(new object());
+        await deletion;
+        if (deletes != 1) throw new InvalidOperationException("Saved file was not deleted exactly once.");
+        await DeleteAfterSaveAsync(Task.FromResult<object?>(null), _ => { deletes++; return Task.CompletedTask; });
+        if (deletes != 1) throw new InvalidOperationException("A failed save attempted to delete a file.");
+    }
+
     internal bool IsSavedFile(CaptureResult capture, string path) => SavedPath(capture) is { } saved &&
         StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(path), Path.GetFullPath(saved));
 
@@ -156,6 +180,8 @@ internal sealed class PreviewStack
     }
 
     internal Task WaitForCacheAsync() => _cacheWork;
+
+    internal void TrimResidentPngs() => RequestCacheTrim();
 
     internal Task ShutdownAsync() => _shutdown ??= ShutdownCoreAsync();
 

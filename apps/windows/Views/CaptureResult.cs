@@ -23,12 +23,55 @@ internal sealed record CaptureResult
         _png = new ScreenshotPngStorage(Png);
     }
 
+    internal CaptureResult(int Width, int Height, Task<byte[]> Png, int PreviewWidth, int PreviewHeight, byte[] PreviewRgba, Win32.Rect WorkArea)
+    {
+        this.Width = Width; this.Height = Height; this.PreviewWidth = PreviewWidth; this.PreviewHeight = PreviewHeight;
+        this.PreviewRgba = PreviewRgba; this.WorkArea = WorkArea;
+        _png = new ScreenshotPngStorage(Png);
+    }
+
     internal Task<byte[]> ReadPngAsync(CancellationToken cancellationToken = default) => _png.ReadAsync(cancellationToken);
     internal Task ReleaseResidentPngAsync(CancellationToken cancellationToken = default) => _png.ReleaseResidentAsync(cancellationToken);
     internal Task DeleteAsync(CancellationToken cancellationToken = default) => _png.DeleteAsync(cancellationToken);
 
     internal static async Task VerifySyntheticStorageAsync(byte[] png)
     {
+        var encoder = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pendingCapture = new CaptureResult(1, 1, encoder.Task, 1, 1, new byte[4], default);
+        Task<byte[]> pendingRead = pendingCapture.ReadPngAsync();
+        Require(!pendingRead.IsCompleted && pendingCapture.ResidentPngBytes == 0,
+            "A pending PNG blocked preview creation or appeared resident prematurely.");
+        encoder.SetResult(png);
+        Require(ReferenceEquals(await pendingRead, png) && pendingCapture.ResidentPngBytes == png.Length,
+            "A completed encode was not published to PNG readers.");
+        await pendingCapture.DeleteAsync();
+
+        var delayed = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelledReadCapture = new CaptureResult(1, 1, delayed.Task, 1, 1, new byte[4], default);
+        using (var waitCancellation = new CancellationTokenSource())
+        {
+            Task<byte[]> cancelledRead = cancelledReadCapture.ReadPngAsync(waitCancellation.Token);
+            waitCancellation.Cancel();
+            try { await cancelledRead; throw new InvalidOperationException("A pending PNG read ignored cancellation."); }
+            catch (OperationCanceledException) { }
+        }
+        await cancelledReadCapture.DeleteAsync();
+        delayed.SetResult(png);
+        Require(cancelledReadCapture.IsDeleted && cancelledReadCapture.ResidentPngBytes == 0,
+            "A completed encode resurrected a deleted screenshot.");
+
+        var racingEncoder = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var racingCapture = new CaptureResult(1, 1, racingEncoder.Task, 1, 1, new byte[4], default);
+        Task<byte[]> racingRead = racingCapture.ReadPngAsync();
+        Task racingDelete = racingCapture.DeleteAsync();
+        Require(!racingDelete.IsCompleted, "Deletion skipped an active PNG read.");
+        racingEncoder.SetResult(png);
+        Require(ReferenceEquals(await racingRead, png), "An active PNG read lost its encoded data.");
+        await racingDelete;
+        await racingCapture.ReleaseResidentPngAsync();
+        Require(racingCapture.IsDeleted && racingCapture.ResidentPngBytes == 0,
+            "Deletion or cache trimming retained a completed PNG.");
+
         var capture = new CaptureResult(1, 1, png, 1, 1, new byte[4], default);
         var copy = capture with { };
         byte[] lease = await capture.ReadPngAsync();
@@ -116,15 +159,26 @@ internal sealed record CaptureResult
     }
 }
 
-internal sealed class ScreenshotPngStorage(byte[] png)
+internal sealed class ScreenshotPngStorage
 {
     private readonly SemaphoreSlim _access = new(1, 1);
-    private byte[]? _resident = png ?? throw new ArgumentNullException(nameof(png));
+    private byte[]? _resident;
+    private Task<byte[]>? _pending;
     private string? _path;
     private bool _deleted;
     internal long ResidentBytes => Volatile.Read(ref _resident)?.LongLength ?? 0;
     internal bool IsDeleted => Volatile.Read(ref _deleted);
     internal string? BackingPath => Volatile.Read(ref _path);
+
+    internal ScreenshotPngStorage(byte[] png) => _resident = png ?? throw new ArgumentNullException(nameof(png));
+
+    internal ScreenshotPngStorage(Task<byte[]> png)
+    {
+        _pending = png ?? throw new ArgumentNullException(nameof(png));
+        // A preview may be discarded before anyone reads a failed encode.
+        _ = png.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
 
     internal async Task<byte[]> ReadAsync(CancellationToken cancellationToken)
     {
@@ -133,6 +187,13 @@ internal sealed class ScreenshotPngStorage(byte[] png)
         {
             if (_deleted) throw new InvalidOperationException("This screenshot has been deleted.");
             if (_resident is not null) return _resident;
+            if (_pending is not null)
+            {
+                byte[] png = await _pending.WaitAsync(cancellationToken);
+                Volatile.Write(ref _resident, png);
+                _pending = null;
+                return png;
+            }
             if (_path is null) throw new InvalidOperationException("The screenshot has no image data.");
             // The caller owns this read lease; do not silently repopulate the resident budget.
             return await ScreenshotFileCache.ReadBackingFileAsync(_path, cancellationToken);
@@ -165,6 +226,7 @@ internal sealed class ScreenshotPngStorage(byte[] png)
             if (_path is not null) await ScreenshotFileCache.DeleteBackingFileAsync(_path, cancellationToken);
             _path = null;
             Volatile.Write(ref _resident, null);
+            _pending = null;
             Volatile.Write(ref _deleted, true);
         }
         finally { _access.Release(); }

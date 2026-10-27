@@ -13,6 +13,7 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
     private CaptureSetupWindow? _captureSetup;
     private CancellationTokenSource? _cancellation;
     private Task _captureTask = Task.CompletedTask;
+    private readonly HashSet<Task> _pendingSaves = [];
     private CaptureResult? _lastCapture;
     private StoredCaptureFile? _lastScreenshotFile;
     private VideoPreview? _lastVideo;
@@ -134,24 +135,25 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
             else
             {
                 var placement = topology.ForRectangle(window?.Bounds ?? desktopRegion);
-                _lastCapture = await CreateScreenshotAsync(display, region.Value, window, placement.WorkArea, cancellation.Token);
+                var capture = await CreateScreenshotAsync(display, region.Value, window, placement.WorkArea, cancellation.Token);
+                _lastCapture = capture;
                 _lastScreenshotFile = null;
-                if (storage is not null)
+                _lastWasRecording = false;
+                // A completed capture is accepted work. The task is drained on quit,
+                // and the preview's delete capability waits for the same save.
+                Task<StoredCaptureFile?> save = SaveScreenshotAsync(capture);
+                try
                 {
-                    // A completed capture is accepted work: finish its save even if quit begins.
-                    try { _lastScreenshotFile = await storage.SaveScreenshotAsync(await _lastCapture.ReadPngAsync()); }
-                    catch (Exception error)
+                    if (!_stopping)
                     {
-                        var failure = new InvalidOperationException("Screenshot could not be saved automatically. Use Save in the preview.", error);
-                        if (_stopping) AppLog.Shared.Write(failure); else report(failure);
+                        previews.Show(capture, storage is null ? null : () => PreviewStack.DeleteAfterSaveAsync(save, file => file.DeleteAsync()));
+                        // The stack was hidden for capture; make the new image visible
+                        // before waiting for encoding or storage.
+                        previews.Restore();
+                        CaptureSound.Play();
                     }
                 }
-                _lastWasRecording = false;
-                if (!_stopping)
-                {
-                    previews.Show(_lastCapture, _lastScreenshotFile is { } savedFile ? savedFile.DeleteAsync : null, _lastScreenshotFile?.Path);
-                    CaptureSound.Play();
-                }
+                finally { TrackSave(capture, save); }
             }
             if (!settingsVisible) RestoreFocus(previousFocus, false);
         }
@@ -174,6 +176,52 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
     private static void EnsureDisplaysUnchanged(DisplayTopology topology)
     {
         if (!topology.IsCurrent()) throw new InvalidOperationException("The display layout changed. Start the capture again.");
+    }
+
+    private async Task<StoredCaptureFile?> SaveScreenshotAsync(CaptureResult capture)
+    {
+        if (storage is null) return null;
+        byte[] png;
+        try { png = await capture.ReadPngAsync(); }
+        catch (Exception error)
+        {
+            var failure = new InvalidOperationException("Screenshot image could not be prepared. Please capture it again.", error);
+            if (_stopping) AppLog.Shared.Write(failure); else report(failure);
+            return null;
+        }
+        try { return await storage.SaveScreenshotAsync(png); }
+        catch (Exception error)
+        {
+            var failure = new InvalidOperationException("Screenshot could not be saved automatically. Use Save in the preview.", error);
+            if (_stopping) AppLog.Shared.Write(failure); else report(failure);
+            return null;
+        }
+    }
+
+    private void TrackSave(CaptureResult capture, Task<StoredCaptureFile?> save)
+    {
+        Task completion = CompleteSaveAsync(capture, save);
+        if (completion.IsCompleted) return;
+        _pendingSaves.Add(completion);
+        _ = RemoveCompletedSaveAsync(completion);
+    }
+
+    private async Task CompleteSaveAsync(CaptureResult capture, Task<StoredCaptureFile?> save)
+    {
+        StoredCaptureFile? saved = await save;
+        if (saved is not null && !capture.IsDeleted)
+        {
+            if (ReferenceEquals(_lastCapture, capture)) _lastScreenshotFile = saved;
+            previews.SetSavedPath(capture, saved.Path);
+        }
+        previews.TrimResidentPngs();
+    }
+
+    private async Task RemoveCompletedSaveAsync(Task save)
+    {
+        try { await save; }
+        catch (Exception error) { AppLog.Shared.Write(error); }
+        finally { _pendingSaves.Remove(save); }
     }
 
     private Task<RecordingOptions> RecordingOptionsAsync(CancellationToken cancellation)
@@ -323,5 +371,6 @@ internal sealed class CaptureCoordinator(SettingsWindow settings, PreviewStack p
         _cancellation?.Cancel();
         _captureSetup?.CloseSafely(); _selection?.Cancel(); _countdown?.Cancel();
         await _captureTask;
+        await Task.WhenAll(_pendingSaves.ToArray());
     }
 }
