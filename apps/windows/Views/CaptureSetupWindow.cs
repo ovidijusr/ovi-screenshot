@@ -108,7 +108,7 @@ internal sealed class CaptureSetupWindow : Window
             Content = new FontIcon { Glyph = "\uE713", FontSize = 15 },
             Style = (Style)Application.Current.Resources["SubtleButtonStyle"],
             Width = 36, Height = 36, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center,
-            Flyout = new Flyout { Content = optionsScroll }
+            Flyout = new Flyout { Content = optionsScroll, ShouldConstrainToRootBounds = false }
         };
         deviceOptions.PreviewKeyDown += (_, args) =>
         {
@@ -423,7 +423,31 @@ internal sealed class CaptureSetupWindow : Window
             await Task.Delay(75);
             live.CancelIfFocusLeftSelection();
             Require(cancels == 0 && owner.AppWindow.IsVisible, "the audio devices flyout cancelled selection");
-            if (renderSettings is not null) await renderSettings((FrameworkElement)((Flyout)live._devicesButton.Flyout).Content);
+            var flyout = (Flyout)live._devicesButton.Flyout;
+            var scroll = (ScrollViewer)flyout.Content;
+            scroll.UpdateLayout();
+            Require(!flyout.ShouldConstrainToRootBounds && scroll.ActualHeight > live.AppWindow.Size.Height / live._scale * 2 &&
+                scroll.ViewportHeight > 100 && live._fps.ActualWidth >= 200,
+                $"settings were clipped to the toolbar ({scroll.ActualWidth:F1} x {scroll.ActualHeight:F1}, viewport {scroll.ViewportHeight:F1})");
+            var scrollOrigin = scroll.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0));
+            double toolbarHeight = live.AppWindow.Size.Height / live._scale;
+            Require(scrollOrigin.Y < -50 || scrollOrigin.Y + scroll.ActualHeight > toolbarHeight + 50,
+                "settings did not extend outside the toolbar");
+            live._fps.IsDropDownOpen = true;
+            await Task.Delay(50);
+            Require(live._fps.IsDropDownOpen, "frame rate dropdown did not open in settings");
+            live._fps.IsDropDownOpen = false;
+            if (renderSettings is not null) await renderSettings(scroll);
+            live._system.IsOn = true;
+            scroll.UpdateLayout();
+            scroll.ChangeView(null, scroll.ScrollableHeight, null, true);
+            await Task.Delay(50);
+            live._microphoneDevice.IsDropDownOpen = true;
+            await Task.Delay(50);
+            Require(live._microphoneDevice.IsDropDownOpen && scroll.ViewportHeight > 100,
+                "microphone device dropdown did not open when both audio sources were enabled");
+            live._microphoneDevice.IsDropDownOpen = false;
+            live._system.IsOn = false;
             live._devicesButton.Flyout!.Hide();
             owner.Activate();
             await Task.Delay(50);
